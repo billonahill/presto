@@ -14,6 +14,7 @@
 package com.facebook.presto;
 
 import com.facebook.presto.client.ClientSession;
+import com.facebook.presto.connector.ConnectorManager;
 import com.facebook.presto.execution.QueryId;
 import com.facebook.presto.metadata.SessionPropertyManager;
 import com.facebook.presto.spi.ConnectorSession;
@@ -296,7 +297,7 @@ public final class Session
                 timeZoneKey,
                 locale,
                 startTime,
-                catalogProperties.getOrDefault(catalog, ImmutableMap.of()),
+                catalogProperties.getOrDefault(catalog.replace(ConnectorManager.INFORMATION_SCHEMA_CONNECTOR_PREFIX, ""), ImmutableMap.of()),
                 catalog,
                 sessionPropertyManager);
     }

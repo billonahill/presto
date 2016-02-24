@@ -62,7 +62,7 @@ public class JdbcMetadata
     @Override
     public List<String> listSchemaNames(ConnectorSession session)
     {
-        return ImmutableList.copyOf(jdbcClient.getSchemaNames());
+        return ImmutableList.copyOf(jdbcClient.getSchemaNames(session));
     }
 
     @Override
@@ -154,7 +154,7 @@ public class JdbcMetadata
     @Override
     public ConnectorOutputTableHandle beginCreateTable(ConnectorSession session, ConnectorTableMetadata tableMetadata)
     {
-        return jdbcClient.beginCreateTable(tableMetadata);
+        return jdbcClient.beginCreateTable(session, tableMetadata);
     }
 
     @Override

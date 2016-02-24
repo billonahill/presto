@@ -19,10 +19,15 @@ import com.facebook.presto.spi.ConnectorMetadata;
 import com.facebook.presto.spi.ConnectorRecordSetProvider;
 import com.facebook.presto.spi.ConnectorRecordSinkProvider;
 import com.facebook.presto.spi.ConnectorSplitManager;
+import com.facebook.presto.spi.session.PropertyMetadata;
+import com.facebook.presto.spi.type.VarcharType;
 import io.airlift.bootstrap.LifeCycleManager;
 import io.airlift.log.Logger;
 
 import javax.inject.Inject;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static java.util.Objects.requireNonNull;
 
@@ -83,6 +88,17 @@ public class JdbcConnector
     public ConnectorRecordSinkProvider getRecordSinkProvider()
     {
         return jdbcRecordSinkProvider;
+    }
+
+    @Override
+    public List<PropertyMetadata<?>> getSessionProperties()
+    {
+        PropertyMetadata<String> passwordProperty = new PropertyMetadata<String>(
+                "foopassword", "user password", VarcharType.VARCHAR, String.class, null, false);
+        List<PropertyMetadata<?>> list = new ArrayList<>();
+        list.add(passwordProperty);
+        return list;
+//        return emptyList();
     }
 
     @Override

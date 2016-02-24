@@ -14,6 +14,7 @@
 package com.facebook.presto.plugin.jdbc;
 
 import com.facebook.presto.spi.ColumnMetadata;
+import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.ConnectorSplitSource;
 import com.facebook.presto.spi.ConnectorTableMetadata;
 import com.facebook.presto.spi.FixedSplitSource;
@@ -109,8 +110,11 @@ public class BaseJdbcClient
     }
 
     @Override
-    public Set<String> getSchemaNames()
+    public Set<String> getSchemaNames(ConnectorSession session)
     {
+        String pw = session.getProperty("foopassword", String.class);
+        connectionProperties.setProperty("user", session.getUser());
+        connectionProperties.setProperty("password", pw);
         try (Connection connection = driver.connect(connectionUrl, connectionProperties);
                 ResultSet resultSet = connection.getMetaData().getSchemas()) {
             ImmutableSet.Builder<String> schemaNames = ImmutableSet.builder();
@@ -257,13 +261,13 @@ public class BaseJdbcClient
     }
 
     @Override
-    public JdbcOutputTableHandle beginCreateTable(ConnectorTableMetadata tableMetadata)
+    public JdbcOutputTableHandle beginCreateTable(ConnectorSession session, ConnectorTableMetadata tableMetadata)
     {
         SchemaTableName schemaTableName = tableMetadata.getTable();
         String schema = schemaTableName.getSchemaName();
         String table = schemaTableName.getTableName();
 
-        if (!getSchemaNames().contains(schema)) {
+        if (!getSchemaNames(session).contains(schema)) {
             throw new PrestoException(NOT_FOUND, "Schema not found: " + schema);
         }
 

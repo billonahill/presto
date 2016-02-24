@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.plugin.jdbc;
 
+import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.ConnectorSplitSource;
 import com.facebook.presto.spi.ConnectorTableMetadata;
 import com.facebook.presto.spi.SchemaTableName;
@@ -29,7 +30,7 @@ import java.util.Set;
 
 public interface JdbcClient
 {
-    Set<String> getSchemaNames();
+    Set<String> getSchemaNames(ConnectorSession session);
 
     List<SchemaTableName> getTableNames(@Nullable String schema);
 
@@ -45,7 +46,7 @@ public interface JdbcClient
 
     String buildSql(JdbcSplit split, List<JdbcColumnHandle> columnHandles);
 
-    JdbcOutputTableHandle beginCreateTable(ConnectorTableMetadata tableMetadata);
+    JdbcOutputTableHandle beginCreateTable(ConnectorSession session, ConnectorTableMetadata tableMetadata);
 
     void commitCreateTable(JdbcOutputTableHandle handle, Collection<Slice> fragments);
 

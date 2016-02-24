@@ -16,6 +16,7 @@ package com.facebook.presto.plugin.mysql;
 import com.facebook.presto.plugin.jdbc.BaseJdbcClient;
 import com.facebook.presto.plugin.jdbc.BaseJdbcConfig;
 import com.facebook.presto.plugin.jdbc.JdbcConnectorId;
+import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.type.Type;
 import com.google.common.base.Throwables;
@@ -52,7 +53,7 @@ public class MySqlClient
     }
 
     @Override
-    public Set<String> getSchemaNames()
+    public Set<String> getSchemaNames(ConnectorSession session)
     {
         // for MySQL, we need to list catalogs instead of schemas
         try (Connection connection = driver.connect(connectionUrl, connectionProperties);

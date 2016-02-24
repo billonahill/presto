@@ -55,7 +55,7 @@ public class TestJdbcClient
     public void testMetadata()
             throws Exception
     {
-        assertTrue(jdbcClient.getSchemaNames().containsAll(ImmutableSet.of("example", "tpch")));
+        assertTrue(jdbcClient.getSchemaNames(null).containsAll(ImmutableSet.of("example", "tpch")));
         assertEquals(jdbcClient.getTableNames("example"), ImmutableList.of(
                 new SchemaTableName("example", "numbers"),
                 new SchemaTableName("example", "view_source"),
