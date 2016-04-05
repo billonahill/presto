@@ -69,6 +69,7 @@ import com.facebook.presto.sql.tree.SearchedCaseExpression;
 import com.facebook.presto.sql.tree.SimpleCaseExpression;
 import com.facebook.presto.sql.tree.StringLiteral;
 import com.facebook.presto.sql.tree.SubscriptExpression;
+import com.facebook.presto.sql.tree.TryExpression;
 import com.facebook.presto.sql.tree.WhenClause;
 import com.facebook.presto.type.ArrayType;
 import com.facebook.presto.type.LikeFunctions;
@@ -78,12 +79,12 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Functions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import io.airlift.joni.Regex;
 import io.airlift.json.JsonCodec;
 import io.airlift.slice.Slice;
-import org.jetbrains.annotations.NotNull;
 
 import java.lang.invoke.MethodHandle;
 import java.util.ArrayList;
@@ -99,6 +100,7 @@ import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
 import static com.facebook.presto.spi.type.TypeUtils.writeNativeValue;
 import static com.facebook.presto.sql.analyzer.ExpressionAnalyzer.createConstantAnalyzer;
 import static com.facebook.presto.sql.analyzer.SemanticErrorCode.EXPRESSION_NOT_CONSTANT;
+import static com.facebook.presto.sql.gen.TryCodeGenerator.tryExpressionExceptionHandler;
 import static com.facebook.presto.sql.planner.LiteralInterpreter.toExpression;
 import static com.facebook.presto.sql.planner.LiteralInterpreter.toExpressions;
 import static com.facebook.presto.type.TypeRegistry.canCoerce;
@@ -141,10 +143,8 @@ public class ExpressionInterpreter
         return new ExpressionInterpreter(expression, metadata, session, expressionTypes, true);
     }
 
-    public static Object evaluateConstantExpression(Expression expression, Type expectedType, Metadata metadata, Session session, Set<Expression> columnReferences)
+    public static Object evaluateConstantExpression(Expression expression, Type expectedType, Metadata metadata, Session session)
     {
-        requireNonNull(columnReferences, "columnReferences is null");
-
         ExpressionAnalyzer analyzer = createConstantAnalyzer(metadata, session);
         analyzer.analyze(expression, new RelationType(), new AnalysisContext());
 
@@ -158,7 +158,7 @@ public class ExpressionInterpreter
         IdentityHashMap<Expression, Type> coercions = new IdentityHashMap<>();
         coercions.putAll(analyzer.getExpressionCoercions());
         coercions.put(expression, expectedType);
-        return evaluateConstantExpression(expression, coercions, metadata, session, columnReferences);
+        return evaluateConstantExpression(expression, coercions, metadata, session, ImmutableSet.of());
     }
 
     public static Object evaluateConstantExpression(Expression expression, IdentityHashMap<Expression, Type> coercions, Metadata metadata, Session session, Set<Expression> columnReferences)
@@ -178,6 +178,7 @@ public class ExpressionInterpreter
 
                 // cast expression if coercion is registered
                 Type coerceToType = coercions.get(node);
+
                 if (coerceToType != null) {
                     rewrittenExpression = new Cast(rewrittenExpression, coerceToType.getTypeSignature().toString());
                 }
@@ -913,18 +914,39 @@ public class ExpressionInterpreter
         }
 
         @Override
+        protected Object visitTryExpression(TryExpression node, Object context)
+        {
+            try {
+                Object innerExpression = process(node.getInnerExpression(), context);
+                if (innerExpression instanceof Expression) {
+                    return new TryExpression((Expression) innerExpression);
+                }
+
+                return innerExpression;
+            }
+            catch (PrestoException e) {
+                tryExpressionExceptionHandler(e);
+            }
+            return null;
+        }
+
+        @Override
         public Object visitCast(Cast node, Object context)
         {
             Object value = process(node.getExpression(), context);
 
             if (value instanceof Expression) {
-                return new Cast((Expression) value, node.getType(), node.isSafe());
+                return new Cast((Expression) value, node.getType(), node.isSafe(), node.isTypeOnly());
+            }
+
+            if (node.isTypeOnly()) {
+                return value;
             }
 
             // hack!!! don't optimize CASTs for types that cannot be represented in the SQL AST
             // TODO: this will not be an issue when we migrate to RowExpression tree for this, which allows arbitrary literals.
             if (optimize && !FunctionRegistry.isSupportedLiteralType(expressionTypes.get(node))) {
-                return new Cast(toExpression(value, expressionTypes.get(node.getExpression())), node.getType(), node.isSafe());
+                return new Cast(toExpression(value, expressionTypes.get(node.getExpression())), node.getType(), node.isSafe(), node.isTypeOnly());
             }
 
             if (value == null) {
@@ -1079,7 +1101,6 @@ public class ExpressionInterpreter
     }
 
     @VisibleForTesting
-    @NotNull
     public static Expression createFailureFunction(RuntimeException exception, Type type)
     {
         requireNonNull(exception, "Exception is null");

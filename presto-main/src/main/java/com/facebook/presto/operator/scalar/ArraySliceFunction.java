@@ -38,7 +38,7 @@ public final class ArraySliceFunction
 
     public ArraySliceFunction()
     {
-        super(FUNCTION_NAME, ImmutableList.of(typeParameter("E")), "array<E>", ImmutableList.of("array<E>", "bigint", "bigint"));
+        super(FUNCTION_NAME, ImmutableList.of(typeParameter("E")), "array(E)", ImmutableList.of("array(E)", "bigint", "bigint"));
     }
 
     @Override
@@ -69,8 +69,8 @@ public final class ArraySliceFunction
 
     public static Block slice(Type type, Block array, long fromIndex, long length)
     {
-        checkCondition(length >= 0, INVALID_FUNCTION_ARGUMENT, "Invalid array length");
-        checkCondition(fromIndex != 0, INVALID_FUNCTION_ARGUMENT, "Invalid start index");
+        checkCondition(length >= 0, INVALID_FUNCTION_ARGUMENT, "length must be greater than or equal to 0");
+        checkCondition(fromIndex != 0, INVALID_FUNCTION_ARGUMENT, "SQL array indices start at 1");
 
         int size = array.getPositionCount();
         if (size == 0) {

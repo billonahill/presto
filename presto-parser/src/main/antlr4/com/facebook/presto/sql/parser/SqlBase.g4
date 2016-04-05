@@ -30,7 +30,7 @@ statement
     : query                                                            #statementDefault
     | USE schema=identifier                                            #use
     | USE catalog=identifier '.' schema=identifier                     #use
-    | CREATE TABLE qualifiedName
+    | CREATE TABLE (IF NOT EXISTS)? qualifiedName
         (WITH tableProperties)? AS query
         (WITH (NO)? DATA)?                                             #createTableAsSelect
     | CREATE TABLE (IF NOT EXISTS)? qualifiedName
@@ -46,7 +46,13 @@ statement
         ADD COLUMN column=tableElement                                 #addColumn
     | CREATE (OR REPLACE)? VIEW qualifiedName AS query                 #createView
     | DROP VIEW (IF EXISTS)? qualifiedName                             #dropView
-    | EXPLAIN ('(' explainOption (',' explainOption)* ')')? statement  #explain
+    | CALL qualifiedName '(' (callArgument (',' callArgument)*)? ')'   #call
+    | GRANT
+        (privilege (',' privilege)* | ALL PRIVILEGES)
+        ON TABLE? qualifiedName TO grantee=identifier
+        (WITH GRANT OPTION)?                                           #grant
+    | EXPLAIN ANALYZE?
+        ('(' explainOption (',' explainOption)* ')')? statement        #explain
     | SHOW TABLES ((FROM | IN) qualifiedName)? (LIKE pattern=STRING)?  #showTables
     | SHOW SCHEMAS ((FROM | IN) identifier)?                           #showSchemas
     | SHOW CATALOGS                                                    #showCatalogs
@@ -114,8 +120,12 @@ querySpecification
     : SELECT setQuantifier? selectItem (',' selectItem)*
       (FROM relation (',' relation)*)?
       (WHERE where=booleanExpression)?
-      (GROUP BY groupingElement (',' groupingElement)*)?
+      (GROUP BY groupBy)?
       (HAVING having=booleanExpression)?
+    ;
+
+groupBy
+    : setQuantifier? groupingElement (',' groupingElement)*
     ;
 
 groupingElement
@@ -298,10 +308,14 @@ type
     : type ARRAY
     | ARRAY '<' type '>'
     | MAP '<' type ',' type '>'
-    | simpleType
+    | baseType ('(' typeParameter (',' typeParameter)* ')')?
     ;
 
-simpleType
+typeParameter
+    : INTEGER_VALUE | type
+    ;
+
+baseType
     : TIME_WITH_TIME_ZONE
     | TIMESTAMP_WITH_TIME_ZONE
     | identifier
@@ -351,6 +365,15 @@ levelOfIsolation
     | SERIALIZABLE                        #serializable
     ;
 
+callArgument
+    : expression                    #positionalArgument
+    | identifier '=>' expression    #namedArgument
+    ;
+
+privilege
+    : SELECT | DELETE | INSERT | identifier
+    ;
+
 qualifiedName
     : identifier ('.' identifier)*
     ;
@@ -375,20 +398,24 @@ number
 nonReserved
     : SHOW | TABLES | COLUMNS | COLUMN | PARTITIONS | FUNCTIONS | SCHEMAS | CATALOGS | SESSION
     | ADD
-    | OVER | PARTITION | RANGE | ROWS | PRECEDING | FOLLOWING | CURRENT | ROW | MAP
+    | OVER | PARTITION | RANGE | ROWS | PRECEDING | FOLLOWING | CURRENT | ROW | MAP | ARRAY
     | DATE | TIME | TIMESTAMP | INTERVAL | ZONE
     | YEAR | MONTH | DAY | HOUR | MINUTE | SECOND
-    | EXPLAIN | FORMAT | TYPE | TEXT | GRAPHVIZ | LOGICAL | DISTRIBUTED
+    | EXPLAIN | ANALYZE | FORMAT | TYPE | TEXT | GRAPHVIZ | LOGICAL | DISTRIBUTED
     | TABLESAMPLE | SYSTEM | BERNOULLI | POISSONIZED | USE | TO
     | RESCALED | APPROXIMATE | AT | CONFIDENCE
     | SET | RESET
     | VIEW | REPLACE
     | IF | NULLIF | COALESCE
+    | TRY
     | normalForm
     | POSITION
     | NO | DATA
     | START | TRANSACTION | COMMIT | ROLLBACK | WORK | ISOLATION | LEVEL
     | SERIALIZABLE | REPEATABLE | COMMITTED | UNCOMMITTED | READ | WRITE | ONLY
+    | CALL
+    | GRANT | PRIVILEGES | PUBLIC | OPTION
+    | SUBSTRING
     ;
 
 normalForm
@@ -490,13 +517,19 @@ DELETE: 'DELETE';
 INTO: 'INTO';
 CONSTRAINT: 'CONSTRAINT';
 DESCRIBE: 'DESCRIBE';
+GRANT: 'GRANT';
+PRIVILEGES: 'PRIVILEGES';
+PUBLIC: 'PUBLIC';
+OPTION: 'OPTION';
 EXPLAIN: 'EXPLAIN';
+ANALYZE: 'ANALYZE';
 FORMAT: 'FORMAT';
 TYPE: 'TYPE';
 TEXT: 'TEXT';
 GRAPHVIZ: 'GRAPHVIZ';
 LOGICAL: 'LOGICAL';
 DISTRIBUTED: 'DISTRIBUTED';
+TRY: 'TRY';
 CAST: 'CAST';
 TRY_CAST: 'TRY_CAST';
 SHOW: 'SHOW';
@@ -543,6 +576,7 @@ UNCOMMITTED: 'UNCOMMITTED';
 READ: 'READ';
 WRITE: 'WRITE';
 ONLY: 'ONLY';
+CALL: 'CALL';
 
 NORMALIZE: 'NORMALIZE';
 NFD : 'NFD';

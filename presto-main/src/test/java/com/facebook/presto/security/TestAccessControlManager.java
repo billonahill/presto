@@ -14,7 +14,6 @@
 package com.facebook.presto.security;
 
 import com.facebook.presto.metadata.QualifiedObjectName;
-import com.facebook.presto.spi.ConnectorHandleResolver;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.connector.Connector;
@@ -23,6 +22,7 @@ import com.facebook.presto.spi.connector.ConnectorMetadata;
 import com.facebook.presto.spi.connector.ConnectorSplitManager;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
 import com.facebook.presto.spi.security.Identity;
+import com.facebook.presto.spi.security.Privilege;
 import com.facebook.presto.spi.security.SystemAccessControl;
 import com.facebook.presto.spi.security.SystemAccessControlFactory;
 import com.facebook.presto.spi.transaction.IsolationLevel;
@@ -118,12 +118,6 @@ public class TestAccessControlManager
             {
                 // Just return something
                 return new ConnectorTransactionHandle() {};
-            }
-
-            @Override
-            public ConnectorHandleResolver getHandleResolver()
-            {
-                throw new UnsupportedOperationException();
             }
 
             @Override
@@ -280,6 +274,12 @@ public class TestAccessControlManager
 
         @Override
         public void checkCanSetCatalogSessionProperty(Identity identity, String propertyName)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void checkCanGrantTablePrivilege(Identity identity, Privilege privilege, SchemaTableName tableName)
         {
             throw new UnsupportedOperationException();
         }

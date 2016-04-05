@@ -5,7 +5,7 @@
     <parent>
         <groupId>com.facebook.presto</groupId>
         <artifactId>presto-root</artifactId>
-        <version>0.132-tw-0.16</version>
+        <version>0.143-tw-0.21</version>
     </parent>
 
     <artifactId>presto-main</artifactId>
@@ -296,6 +296,24 @@
             <artifactId>tpch</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- twitter deps -->
+        <dependency>
+            <groupId>com.twitter</groupId>
+            <artifactId>presto-thrift-java</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.twitter</groupId>
+            <artifactId>util-logging_2.11</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.thrift</groupId>
+            <artifactId>libthrift</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-library</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
@@ -305,14 +323,6 @@
                 <artifactId>modernizer-maven-plugin</artifactId>
                 <configuration>
                     <failOnViolations>false</failOnViolations>
-                </configuration>
-            </plugin>
-
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <configuration>
-                    <excludedGroups>hive</excludedGroups>
                 </configuration>
             </plugin>
         </plugins>

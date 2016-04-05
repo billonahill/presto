@@ -124,25 +124,25 @@ public final class TestingRowConstructor
     }
 
     @ScalarFunction("test_row")
-    @SqlType("row<boolean,array<bigint>>('col0','col1')")
-    public static Block testRowBooleanArray(@Nullable @SqlType(StandardTypes.BOOLEAN) Boolean arg1, @Nullable @SqlType("array<bigint>") Block arg2)
+    @SqlType("row<boolean,array(bigint)>('col0','col1')")
+    public static Block testRowBooleanArray(@Nullable @SqlType(StandardTypes.BOOLEAN) Boolean arg1, @Nullable @SqlType("array(bigint)") Block arg2)
     {
         List<Type> parameterTypes = ImmutableList.of(BOOLEAN, new ArrayType(BIGINT));
         return toStackRepresentation(parameterTypes, arg1, arg2);
     }
 
     @ScalarFunction("test_row")
-    @SqlType("row<boolean,array<bigint>,map<bigint,double>>('col0','col1','col2')")
-    public static Block testRowBooleanArrayMap(@Nullable @SqlType(StandardTypes.BOOLEAN) Boolean arg1, @Nullable @SqlType("array<bigint>") Block arg2,
-                                               @Nullable @SqlType("map<bigint,double>") Block arg3)
+    @SqlType("row<boolean,array(bigint),map(bigint,double)>('col0','col1','col2')")
+    public static Block testRowBooleanArrayMap(@Nullable @SqlType(StandardTypes.BOOLEAN) Boolean arg1, @Nullable @SqlType("array(bigint)") Block arg2,
+                                               @Nullable @SqlType("map(bigint,double)") Block arg3)
     {
         List<Type> parameterTypes = ImmutableList.of(BOOLEAN, new ArrayType(BIGINT), new MapType(BIGINT, DOUBLE));
         return toStackRepresentation(parameterTypes, arg1, arg2, arg3);
     }
 
     @ScalarFunction("test_row")
-    @SqlType("row<double,array<bigint>,row<bigint,double>('col0','col1')>('col0','col1','col2')")
-    public static Block testNestedRow(@Nullable @SqlType(StandardTypes.DOUBLE) Double arg1, @Nullable @SqlType("array<bigint>") Block arg2,
+    @SqlType("row<double,array(bigint),row<bigint,double>('col0','col1')>('col0','col1','col2')")
+    public static Block testNestedRow(@Nullable @SqlType(StandardTypes.DOUBLE) Double arg1, @Nullable @SqlType("array(bigint)") Block arg2,
                                                @Nullable @SqlType("row<bigint,double>('col0','col1')") Block arg3)
     {
         List<Type> parameterTypes = ImmutableList.of(
@@ -152,10 +152,10 @@ public final class TestingRowConstructor
     }
 
     @ScalarFunction("test_row")
-    @SqlType("row<double,array<row<bigint,double>('col0','col1')>,row<bigint,double>('col0','col1')>('col0','col1','col2')")
+    @SqlType("row<double,array(row<bigint,double>('col0','col1')),row<bigint,double>('col0','col1')>('col0','col1','col2')")
     public static Block testNestedRowWithArray(
             @Nullable @SqlType(StandardTypes.DOUBLE) Double arg1,
-            @Nullable @SqlType("array<row<bigint,double>('col0','col1')>") Block arg2,
+            @Nullable @SqlType("array(row<bigint,double>('col0','col1'))") Block arg2,
             @Nullable @SqlType("row<bigint,double>('col0','col1')") Block arg3)
     {
         List<Type> parameterTypes = ImmutableList.of(
@@ -170,6 +170,13 @@ public final class TestingRowConstructor
     public static Block testRowBigintBigint(@Nullable @SqlType(StandardTypes.TIMESTAMP) Long arg1)
     {
         return toStackRepresentation(ImmutableList.of(TIMESTAMP), arg1);
+    }
+
+    @ScalarFunction("test_non_lowercase_row")
+    @SqlType("row<bigint>('Col0')")
+    public static Block testNonLowercaseRowBigint(@Nullable @SqlType(StandardTypes.BIGINT) Long arg1)
+    {
+        return toStackRepresentation(ImmutableList.of(BIGINT), arg1);
     }
 
     public static Block toStackRepresentation(List<Type> parameterTypes, Object... values)

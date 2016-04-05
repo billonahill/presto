@@ -18,6 +18,7 @@ import com.facebook.presto.sql.tree.ArithmeticBinaryExpression;
 import com.facebook.presto.sql.tree.ArithmeticUnaryExpression;
 import com.facebook.presto.sql.tree.ArrayConstructor;
 import com.facebook.presto.sql.tree.AstVisitor;
+import com.facebook.presto.sql.tree.AtTimeZone;
 import com.facebook.presto.sql.tree.BetweenPredicate;
 import com.facebook.presto.sql.tree.BinaryLiteral;
 import com.facebook.presto.sql.tree.BooleanLiteral;
@@ -64,6 +65,7 @@ import com.facebook.presto.sql.tree.SubqueryExpression;
 import com.facebook.presto.sql.tree.SubscriptExpression;
 import com.facebook.presto.sql.tree.TimeLiteral;
 import com.facebook.presto.sql.tree.TimestampLiteral;
+import com.facebook.presto.sql.tree.TryExpression;
 import com.facebook.presto.sql.tree.WhenClause;
 import com.facebook.presto.sql.tree.Window;
 import com.facebook.presto.sql.tree.WindowFrame;
@@ -117,6 +119,15 @@ public final class ExpressionFormatter
         protected String visitExpression(Expression node, Boolean unmangleNames)
         {
             throw new UnsupportedOperationException(format("not yet implemented: %s.visit%s", getClass().getName(), node.getClass().getSimpleName()));
+        }
+
+        @Override
+        protected String visitAtTimeZone(AtTimeZone node, Boolean context)
+        {
+            return new StringBuilder()
+                    .append(process(node.getValue(), context))
+                    .append(" AT TIME ZONE ")
+                    .append(process(node.getTimeZone(), context)).toString();
         }
 
         @Override
@@ -190,7 +201,7 @@ public final class ExpressionFormatter
         @Override
         protected String visitGenericLiteral(GenericLiteral node, Boolean unmangleNames)
         {
-            return node.getType() + " '" + node.getValue() + "'";
+            return node.getType() + " " + formatStringLiteral(node.getValue());
         }
 
         @Override
@@ -360,6 +371,12 @@ public final class ExpressionFormatter
             }
             builder.append(")");
             return builder.toString();
+        }
+
+        @Override
+        protected String visitTryExpression(TryExpression node, Boolean unmangleNames)
+        {
+            return "TRY(" + process(node.getInnerExpression(), unmangleNames) + ")";
         }
 
         @Override

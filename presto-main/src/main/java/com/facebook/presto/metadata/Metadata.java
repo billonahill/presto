@@ -19,6 +19,7 @@ import com.facebook.presto.spi.ColumnMetadata;
 import com.facebook.presto.spi.Constraint;
 import com.facebook.presto.spi.block.BlockEncodingSerde;
 import com.facebook.presto.spi.predicate.TupleDomain;
+import com.facebook.presto.spi.security.Privilege;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.spi.type.TypeSignature;
@@ -140,15 +141,19 @@ public interface Metadata
      */
     void dropTable(Session session, TableHandle tableHandle);
 
+    Optional<NewTableLayout> getNewTableLayout(Session session, String catalogName, TableMetadata tableMetadata);
+
     /**
      * Begin the atomic creation of a table with data.
      */
-    OutputTableHandle beginCreateTable(Session session, String catalogName, TableMetadata tableMetadata);
+    OutputTableHandle beginCreateTable(Session session, String catalogName, TableMetadata tableMetadata, Optional<NewTableLayout> layout);
 
     /**
      * Finish a table creation with data after the data is written.
      */
     void finishCreateTable(Session session, OutputTableHandle tableHandle, Collection<Slice> fragments);
+
+    Optional<NewTableLayout> getInsertLayout(Session session, TableHandle target);
 
     /**
      * Begin insert query
@@ -228,7 +233,14 @@ public interface Metadata
      */
     Optional<ResolvedIndex> resolveIndex(Session session, TableHandle tableHandle, Set<ColumnHandle> indexableColumns, Set<ColumnHandle> outputColumns, TupleDomain<ColumnHandle> tupleDomain);
 
+    /**
+     * Grants the specified privilege to the specified user on the specified table
+     */
+    void grantTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, String grantee, boolean grantOption);
+
     FunctionRegistry getFunctionRegistry();
+
+    ProcedureRegistry getProcedureRegistry();
 
     TypeManager getTypeManager();
 

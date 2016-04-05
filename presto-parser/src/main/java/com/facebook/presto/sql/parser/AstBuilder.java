@@ -22,9 +22,12 @@ import com.facebook.presto.sql.tree.Approximate;
 import com.facebook.presto.sql.tree.ArithmeticBinaryExpression;
 import com.facebook.presto.sql.tree.ArithmeticUnaryExpression;
 import com.facebook.presto.sql.tree.ArrayConstructor;
+import com.facebook.presto.sql.tree.AtTimeZone;
 import com.facebook.presto.sql.tree.BetweenPredicate;
 import com.facebook.presto.sql.tree.BinaryLiteral;
 import com.facebook.presto.sql.tree.BooleanLiteral;
+import com.facebook.presto.sql.tree.Call;
+import com.facebook.presto.sql.tree.CallArgument;
 import com.facebook.presto.sql.tree.Cast;
 import com.facebook.presto.sql.tree.CoalesceExpression;
 import com.facebook.presto.sql.tree.Commit;
@@ -50,6 +53,8 @@ import com.facebook.presto.sql.tree.Extract;
 import com.facebook.presto.sql.tree.FrameBound;
 import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.GenericLiteral;
+import com.facebook.presto.sql.tree.Grant;
+import com.facebook.presto.sql.tree.GroupBy;
 import com.facebook.presto.sql.tree.GroupingElement;
 import com.facebook.presto.sql.tree.GroupingSets;
 import com.facebook.presto.sql.tree.IfExpression;
@@ -115,6 +120,7 @@ import com.facebook.presto.sql.tree.TimeLiteral;
 import com.facebook.presto.sql.tree.TimestampLiteral;
 import com.facebook.presto.sql.tree.TransactionAccessMode;
 import com.facebook.presto.sql.tree.TransactionMode;
+import com.facebook.presto.sql.tree.TryExpression;
 import com.facebook.presto.sql.tree.Union;
 import com.facebook.presto.sql.tree.Unnest;
 import com.facebook.presto.sql.tree.Use;
@@ -136,7 +142,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
+import static com.google.common.collect.Iterables.getOnlyElement;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
 
@@ -166,7 +174,7 @@ class AstBuilder
     @Override
     public Node visitCreateTableAsSelect(SqlBaseParser.CreateTableAsSelectContext context)
     {
-        return new CreateTableAsSelect(getLocation(context), getQualifiedName(context.qualifiedName()), (Query) visit(context.query()), processTableProperties(context.tableProperties()), context.NO() == null);
+        return new CreateTableAsSelect(getLocation(context), getQualifiedName(context.qualifiedName()), (Query) visit(context.query()), context.EXISTS() != null, processTableProperties(context.tableProperties()), context.NO() == null);
     }
 
     @Override
@@ -298,6 +306,15 @@ class AstBuilder
         return new Isolation(getLocation(context), Isolation.Level.SERIALIZABLE);
     }
 
+    @Override
+    public Node visitCall(SqlBaseParser.CallContext context)
+    {
+        return new Call(
+                getLocation(context),
+                getQualifiedName(context.qualifiedName()),
+                visit(context.callArgument(), CallArgument.class));
+    }
+
     // ********************** query expressions ********************
 
     @Override
@@ -390,10 +407,16 @@ class AstBuilder
                 new Select(getLocation(context.SELECT()), isDistinct(context.setQuantifier()), visit(context.selectItem(), SelectItem.class)),
                 from,
                 visitIfPresent(context.where, Expression.class),
-                visit(context.groupingElement(), GroupingElement.class),
+                visitIfPresent(context.groupBy(), GroupBy.class),
                 visitIfPresent(context.having, Expression.class),
                 ImmutableList.of(),
                 Optional.<String>empty());
+    }
+
+    @Override
+    public Node visitGroupBy(SqlBaseParser.GroupByContext context)
+    {
+        return new GroupBy(getLocation(context), isDistinct(context.setQuantifier()), visit(context.groupingElement(), GroupingElement.class));
     }
 
     @Override
@@ -487,7 +510,7 @@ class AstBuilder
     @Override
     public Node visitExplain(SqlBaseParser.ExplainContext context)
     {
-        return new Explain(getLocation(context), (Statement) visit(context.statement()), visit(context.explainOption(), ExplainOption.class));
+        return new Explain(getLocation(context), context.ANALYZE() != null, (Statement) visit(context.statement()), visit(context.explainOption(), ExplainOption.class));
     }
 
     @Override
@@ -578,6 +601,29 @@ class AstBuilder
     public Node visitResetSession(SqlBaseParser.ResetSessionContext context)
     {
         return new ResetSession(getLocation(context), getQualifiedName(context.qualifiedName()));
+    }
+
+    @Override
+    public Node visitGrant(SqlBaseParser.GrantContext context)
+    {
+        String grantee = context.grantee.getText();
+
+        Optional<List<String>> privileges;
+        if (context.ALL() != null) {
+            privileges = Optional.empty();
+        }
+        else {
+            privileges = Optional.of(context.privilege().stream()
+                    .map(SqlBaseParser.PrivilegeContext::getText)
+                    .collect(toList()));
+        }
+        return new Grant(
+                getLocation(context),
+                privileges,
+                context.TABLE() != null,
+                getQualifiedName(context.qualifiedName()),
+                grantee,
+                context.OPTION() != null);
     }
 
     // ***************** boolean expressions ******************
@@ -869,11 +915,10 @@ class AstBuilder
     @Override
     public Node visitAtTimeZone(SqlBaseParser.AtTimeZoneContext context)
     {
-        return new FunctionCall(
+        return new AtTimeZone(
                 getLocation(context.AT()),
-                QualifiedName.of("at_timezone"), ImmutableList.of(
                 (Expression) visit(context.valueExpression()),
-                (Expression) visit(context.timeZoneSpecifier())));
+                (Expression) visit(context.timeZoneSpecifier()));
     }
 
     @Override
@@ -1044,6 +1089,12 @@ class AstBuilder
 
             return new CoalesceExpression(getLocation(context), visit(context.expression(), Expression.class));
         }
+        if (name.toString().equalsIgnoreCase("try")) {
+            check(!window.isPresent(), "OVER clause not valid for 'try' function", context);
+            check(!distinct, "DISTINCT not valid for 'try' function", context);
+
+            return new TryExpression(getLocation(context), (Expression) visit(getOnlyElement(context.expression())));
+        }
 
         return new FunctionCall(
                 getLocation(context),
@@ -1192,6 +1243,20 @@ class AstBuilder
                         .map((x) -> x.getChild(0).getPayload())
                         .map(Token.class::cast)
                         .map(AstBuilder::getIntervalFieldType));
+    }
+
+    // ***************** arguments *****************
+
+    @Override
+    public Node visitPositionalArgument(SqlBaseParser.PositionalArgumentContext context)
+    {
+        return new CallArgument(getLocation(context), (Expression) visit(context.expression()));
+    }
+
+    @Override
+    public Node visitNamedArgument(SqlBaseParser.NamedArgumentContext context)
+    {
+        return new CallArgument(getLocation(context), context.identifier().getText(), (Expression) visit(context.expression()));
     }
 
     // ***************** helpers *****************
@@ -1452,19 +1517,39 @@ class AstBuilder
 
     private static String getType(SqlBaseParser.TypeContext type)
     {
-        if (type.simpleType() != null) {
-            return type.simpleType().getText();
+        if (type.baseType() != null) {
+            String signature = type.baseType().getText();
+            if (!type.typeParameter().isEmpty()) {
+                String typeParameterSignature = type
+                        .typeParameter()
+                        .stream()
+                        .map(AstBuilder::typeParameterToString)
+                        .collect(Collectors.joining(","));
+                signature += "(" + typeParameterSignature + ")";
+            }
+            return signature;
         }
 
         if (type.ARRAY() != null) {
-            return "ARRAY<" + getType(type.type(0)) + ">";
+            return "ARRAY(" + getType(type.type(0)) + ")";
         }
 
         if (type.MAP() != null) {
-            return "MAP<" + getType(type.type(0)) + "," + getType(type.type(1)) + ">";
+            return "MAP(" + getType(type.type(0)) + "," + getType(type.type(1)) + ")";
         }
 
         throw new IllegalArgumentException("Unsupported type specification: " + type.getText());
+    }
+
+    private static String typeParameterToString(SqlBaseParser.TypeParameterContext typeParameter)
+    {
+        if (typeParameter.INTEGER_VALUE() != null) {
+            return typeParameter.INTEGER_VALUE().toString();
+        }
+        if (typeParameter.type() != null) {
+            return getType(typeParameter.type());
+        }
+        throw new IllegalArgumentException("Unsupported typeParameter: " + typeParameter.getText());
     }
 
     private static void check(boolean condition, String message, ParserRuleContext context)

@@ -407,6 +407,11 @@ public abstract class AstVisitor<R, C>
         return visitExpression(node, context);
     }
 
+    protected R visitTryExpression(TryExpression node, C context)
+    {
+        return visitExpression(node, context);
+    }
+
     protected R visitCast(Cast node, C context)
     {
         return visitExpression(node, context);
@@ -428,6 +433,11 @@ public abstract class AstVisitor<R, C>
     }
 
     protected R visitFrameBound(FrameBound node, C context)
+    {
+        return visitNode(node, context);
+    }
+
+    protected R visitCallArgument(CallArgument node, C context)
     {
         return visitNode(node, context);
     }
@@ -482,12 +492,22 @@ public abstract class AstVisitor<R, C>
         return visitNode(node, context);
     }
 
+    protected R visitCall(Call node, C context)
+    {
+        return visitNode(node, context);
+    }
+
     protected R visitDelete(Delete node, C context)
     {
         return visitStatement(node, context);
     }
 
     protected R visitStartTransaction(StartTransaction node, C context)
+    {
+        return visitStatement(node, context);
+    }
+
+    protected R visitGrant(Grant node, C context)
     {
         return visitStatement(node, context);
     }
@@ -515,5 +535,10 @@ public abstract class AstVisitor<R, C>
     protected R visitRollback(Rollback node, C context)
     {
         return visitStatement(node, context);
+    }
+
+    protected R visitAtTimeZone(AtTimeZone node, C context)
+    {
+        return visitExpression(node, context);
     }
 }
