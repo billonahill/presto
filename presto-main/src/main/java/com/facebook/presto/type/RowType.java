@@ -35,7 +35,7 @@ import java.util.Optional;
 
 import static com.facebook.presto.spi.type.StandardTypes.ROW;
 import static com.facebook.presto.type.TypeUtils.hashPosition;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -181,6 +181,12 @@ public class RowType
     }
 
     @Override
+    public boolean isOrderable()
+    {
+        return fields.stream().allMatch(field -> field.getType().isOrderable());
+    }
+
+    @Override
     public boolean equalTo(Block leftBlock, int leftPosition, Block rightBlock, int rightPosition)
     {
         Block leftRow = leftBlock.getObject(leftPosition, Block.class);
@@ -196,6 +202,28 @@ public class RowType
         }
 
         return true;
+    }
+
+    @Override
+    public int compareTo(Block leftBlock, int leftPosition, Block rightBlock, int rightPosition)
+    {
+        Block leftRow = leftBlock.getObject(leftPosition, Block.class);
+        Block rightRow = rightBlock.getObject(rightPosition, Block.class);
+
+        for (int i = 0; i < leftRow.getPositionCount(); i++) {
+            checkElementNotNull(leftRow.isNull(i));
+            checkElementNotNull(rightRow.isNull(i));
+            Type fieldType = fields.get(i).getType();
+            if (!fieldType.isOrderable()) {
+                throw new UnsupportedOperationException(fieldType.getTypeSignature() + " type is not orderable");
+            }
+            int compareResult = fieldType.compareTo(leftRow, i, rightRow, i);
+            if (compareResult != 0) {
+                return compareResult;
+            }
+        }
+
+        return 0;
     }
 
     @Override

@@ -46,12 +46,6 @@ public final class OuterLookupSource
     }
 
     @Override
-    public boolean isEmpty()
-    {
-        return lookupSource.isEmpty();
-    }
-
-    @Override
     public int getChannelCount()
     {
         return lookupSource.getChannelCount();
@@ -85,6 +79,12 @@ public final class OuterLookupSource
     public long getNextJoinPosition(long currentJoinPosition, int probePosition, Page allProbeChannelsPage)
     {
         return lookupSource.getNextJoinPosition(currentJoinPosition, probePosition, allProbeChannelsPage);
+    }
+
+    @Override
+    public boolean isJoinPositionEligible(long currentJoinPosition, int probePosition, Page allProbeChannelsPage)
+    {
+        return lookupSource.isJoinPositionEligible(currentJoinPosition, probePosition, allProbeChannelsPage);
     }
 
     @Override

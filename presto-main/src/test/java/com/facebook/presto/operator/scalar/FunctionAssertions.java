@@ -75,6 +75,7 @@ import io.airlift.slice.Slices;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 
+import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -102,7 +103,7 @@ import static com.facebook.presto.spi.type.IntegerType.INTEGER;
 import static com.facebook.presto.spi.type.TimestampWithTimeZoneType.TIMESTAMP_WITH_TIME_ZONE;
 import static com.facebook.presto.spi.type.VarbinaryType.VARBINARY;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
-import static com.facebook.presto.sql.ExpressionUtils.rewriteQualifiedNamesToSymbolReferences;
+import static com.facebook.presto.sql.ExpressionUtils.rewriteIdentifiersToSymbolReferences;
 import static com.facebook.presto.sql.analyzer.ExpressionAnalyzer.analyzeExpressionsWithSymbols;
 import static com.facebook.presto.sql.analyzer.ExpressionAnalyzer.getExpressionTypesFromInput;
 import static com.facebook.presto.sql.planner.LocalExecutionPlanner.toTypes;
@@ -120,6 +121,7 @@ import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 
 public final class FunctionAssertions
+        implements Closeable
 {
     private static final ExecutorService EXECUTOR = newCachedThreadPool(daemonThreadsNamed("test-%s"));
 
@@ -202,7 +204,7 @@ public final class FunctionAssertions
         this.session = requireNonNull(session, "session is null");
         runner = new LocalQueryRunner(session, featuresConfig);
         metadata = runner.getMetadata();
-        compiler = new ExpressionCompiler(metadata);
+        compiler = runner.getExpressionCompiler();
     }
 
     public Metadata getMetadata()
@@ -434,7 +436,7 @@ public final class FunctionAssertions
     {
         Expression parsedExpression = SQL_PARSER.createExpression(expression);
 
-        parsedExpression = rewriteQualifiedNamesToSymbolReferences(parsedExpression);
+        parsedExpression = rewriteIdentifiersToSymbolReferences(parsedExpression);
 
         final ExpressionAnalysis analysis = analyzeExpressionsWithSymbols(
                 TEST_SESSION,
@@ -693,7 +695,7 @@ public final class FunctionAssertions
     private static DriverContext createDriverContext(Session session)
     {
         return createTaskContext(EXECUTOR, session)
-                .addPipelineContext(true, true)
+                .addPipelineContext(0, true, true)
                 .addDriverContext();
     }
 
@@ -702,6 +704,12 @@ public final class FunctionAssertions
         assertTrue(types.size() == 1, "Expected one type, but got " + types);
         Type actualType = types.get(0);
         assertEquals(actualType, expectedType);
+    }
+
+    @Override
+    public void close()
+    {
+        runner.close();
     }
 
     private static class TestPageSourceProvider

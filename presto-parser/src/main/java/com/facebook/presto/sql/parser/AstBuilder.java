@@ -24,6 +24,7 @@ import com.facebook.presto.sql.tree.ArrayConstructor;
 import com.facebook.presto.sql.tree.AtTimeZone;
 import com.facebook.presto.sql.tree.BetweenPredicate;
 import com.facebook.presto.sql.tree.BinaryLiteral;
+import com.facebook.presto.sql.tree.BindExpression;
 import com.facebook.presto.sql.tree.BooleanLiteral;
 import com.facebook.presto.sql.tree.Call;
 import com.facebook.presto.sql.tree.CallArgument;
@@ -224,13 +225,15 @@ class AstBuilder
     @Override
     public Node visitCreateTableAsSelect(SqlBaseParser.CreateTableAsSelectContext context)
     {
-        return new CreateTableAsSelect(getLocation(context), getQualifiedName(context.qualifiedName()), (Query) visit(context.query()), context.EXISTS() != null, processTableProperties(context.tableProperties()), context.NO() == null);
+        Optional<String> comment = Optional.ofNullable(context.STRING()).map(value -> unquote(value.getText()));
+        return new CreateTableAsSelect(getLocation(context), getQualifiedName(context.qualifiedName()), (Query) visit(context.query()), context.EXISTS() != null, processTableProperties(context.tableProperties()), context.NO() == null, comment);
     }
 
     @Override
     public Node visitCreateTable(SqlBaseParser.CreateTableContext context)
     {
-        return new CreateTable(getLocation(context), getQualifiedName(context.qualifiedName()), visit(context.tableElement(), TableElement.class), context.EXISTS() != null, processTableProperties(context.tableProperties()));
+        Optional<String> comment = Optional.ofNullable(context.STRING()).map(value -> unquote(value.getText()));
+        return new CreateTable(getLocation(context), getQualifiedName(context.qualifiedName()), visit(context.tableElement(), TableElement.class), context.EXISTS() != null, processTableProperties(context.tableProperties()), comment);
     }
 
     private Map<String, Expression> processTableProperties(TablePropertiesContext tablePropertiesContext)
@@ -1236,6 +1239,16 @@ class AstBuilder
 
             return new TryExpression(getLocation(context), (Expression) visit(getOnlyElement(context.expression())));
         }
+        if (name.toString().equalsIgnoreCase("$internal$bind")) {
+            check(context.expression().size() == 2, "The '$internal$bind' function must have exactly two arguments", context);
+            check(!window.isPresent(), "OVER clause not valid for '$internal$bind' function", context);
+            check(!distinct, "DISTINCT not valid for '$internal$bind' function", context);
+
+            return new BindExpression(
+                    getLocation(context),
+                    (Expression) visit(context.expression(0)),
+                    (Expression) visit(context.expression(1)));
+        }
 
         return new FunctionCall(
                 getLocation(context),
@@ -1268,10 +1281,15 @@ class AstBuilder
     @Override
     public Node visitOver(SqlBaseParser.OverContext context)
     {
+        Optional<OrderBy> orderBy = Optional.empty();
+        if (context.ORDER() != null) {
+            orderBy = Optional.of(new OrderBy(getLocation(context.ORDER()), visit(context.sortItem(), SortItem.class)));
+        }
+
         return new Window(
                 getLocation(context),
                 visit(context.partition, Expression.class),
-                visit(context.sortItem(), SortItem.class),
+                orderBy,
                 visitIfPresent(context.windowFrame(), WindowFrame.class));
     }
 

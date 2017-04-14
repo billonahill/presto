@@ -24,6 +24,7 @@ import com.facebook.presto.spi.type.BigintType;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.type.BigintOperators;
 import com.google.common.collect.ImmutableList;
+import org.openjdk.jol.info.ClassLayout;
 
 import java.util.List;
 
@@ -38,6 +39,8 @@ import static it.unimi.dsi.fastutil.HashCommon.murmurHash3;
 public class BigintGroupByHash
         implements GroupByHash
 {
+    private static final int INSTANCE_SIZE = ClassLayout.parseClass(BigintGroupByHash.class).instanceSize();
+
     private static final float FILL_RATIO = 0.75f;
     private static final List<Type> TYPES = ImmutableList.of(BIGINT);
     private static final List<Type> TYPES_WITH_RAW_HASH = ImmutableList.of(BIGINT, BIGINT);
@@ -87,7 +90,8 @@ public class BigintGroupByHash
     @Override
     public long getEstimatedSize()
     {
-        return groupIds.sizeOf() +
+        return INSTANCE_SIZE +
+                groupIds.sizeOf() +
                 values.sizeOf() +
                 valuesByGroupId.sizeOf();
     }
@@ -310,12 +314,12 @@ public class BigintGroupByHash
 
     private static int calculateMaxFill(int hashSize)
     {
-        checkArgument(hashSize > 0, "hashCapacity must greater than 0");
+        checkArgument(hashSize > 0, "hashSize must be greater than 0");
         int maxFill = (int) Math.ceil(hashSize * FILL_RATIO);
         if (maxFill == hashSize) {
             maxFill--;
         }
-        checkArgument(hashSize > maxFill, "hashCapacity must be larger than maxFill");
+        checkArgument(hashSize > maxFill, "hashSize must be larger than maxFill");
         return maxFill;
     }
 }

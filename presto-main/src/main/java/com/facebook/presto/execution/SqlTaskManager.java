@@ -27,6 +27,8 @@ import com.facebook.presto.memory.NodeMemoryConfig;
 import com.facebook.presto.memory.QueryContext;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.QueryId;
+import com.facebook.presto.spiller.LocalSpillManager;
+import com.facebook.presto.spiller.NodeSpillConfig;
 import com.facebook.presto.sql.planner.LocalExecutionPlanner;
 import com.facebook.presto.sql.planner.PlanFragment;
 import com.google.common.base.Preconditions;
@@ -34,6 +36,7 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
+import com.google.common.util.concurrent.ListenableFuture;
 import io.airlift.concurrent.ThreadPoolExecutorMBean;
 import io.airlift.log.Logger;
 import io.airlift.node.NodeInfo;
@@ -52,7 +55,6 @@ import javax.inject.Inject;
 import java.io.Closeable;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -105,7 +107,9 @@ public class SqlTaskManager
             NodeInfo nodeInfo,
             LocalMemoryManager localMemoryManager,
             TaskManagerConfig config,
-            NodeMemoryConfig nodeMemoryConfig)
+            NodeMemoryConfig nodeMemoryConfig,
+            LocalSpillManager localSpillManager,
+            NodeSpillConfig nodeSpillConfig)
     {
         requireNonNull(nodeInfo, "nodeInfo is null");
         requireNonNull(config, "config is null");
@@ -125,13 +129,22 @@ public class SqlTaskManager
         this.localMemoryManager = requireNonNull(localMemoryManager, "localMemoryManager is null");
         DataSize maxQueryMemoryPerNode = nodeMemoryConfig.getMaxQueryMemoryPerNode();
 
+        DataSize maxQuerySpillPerNode = nodeSpillConfig.getQueryMaxSpillPerNode();
+
         queryContexts = CacheBuilder.newBuilder().weakValues().build(new CacheLoader<QueryId, QueryContext>()
         {
             @Override
             public QueryContext load(QueryId key)
                     throws Exception
             {
-                return new QueryContext(key, maxQueryMemoryPerNode, localMemoryManager.getPool(LocalMemoryManager.GENERAL_POOL), localMemoryManager.getPool(LocalMemoryManager.SYSTEM_POOL), taskNotificationExecutor);
+                return new QueryContext(
+                        key,
+                        maxQueryMemoryPerNode,
+                        localMemoryManager.getPool(LocalMemoryManager.GENERAL_POOL),
+                        localMemoryManager.getPool(LocalMemoryManager.SYSTEM_POOL),
+                        taskNotificationExecutor,
+                        maxQuerySpillPerNode,
+                        localSpillManager.getSpillSpaceTracker());
             }
         });
 
@@ -273,7 +286,7 @@ public class SqlTaskManager
     }
 
     @Override
-    public CompletableFuture<TaskInfo> getTaskInfo(TaskId taskId, TaskState currentState)
+    public ListenableFuture<TaskInfo> getTaskInfo(TaskId taskId, TaskState currentState)
     {
         requireNonNull(taskId, "taskId is null");
         requireNonNull(currentState, "currentState is null");
@@ -292,7 +305,7 @@ public class SqlTaskManager
     }
 
     @Override
-    public CompletableFuture<TaskStatus> getTaskStatus(TaskId taskId, TaskState currentState)
+    public ListenableFuture<TaskStatus> getTaskStatus(TaskId taskId, TaskState currentState)
     {
         requireNonNull(taskId, "taskId is null");
         requireNonNull(currentState, "currentState is null");
@@ -322,7 +335,7 @@ public class SqlTaskManager
     }
 
     @Override
-    public CompletableFuture<BufferResult> getTaskResults(TaskId taskId, OutputBufferId bufferId, long startingSequenceId, DataSize maxSize)
+    public ListenableFuture<BufferResult> getTaskResults(TaskId taskId, OutputBufferId bufferId, long startingSequenceId, DataSize maxSize)
     {
         requireNonNull(taskId, "taskId is null");
         requireNonNull(bufferId, "bufferId is null");

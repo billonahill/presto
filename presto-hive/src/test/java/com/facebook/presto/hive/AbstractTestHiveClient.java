@@ -30,6 +30,8 @@ import com.facebook.presto.hive.metastore.Table;
 import com.facebook.presto.hive.metastore.ThriftHiveMetastore;
 import com.facebook.presto.hive.orc.OrcPageSource;
 import com.facebook.presto.hive.parquet.ParquetHiveRecordCursor;
+import com.facebook.presto.hive.parquet.ParquetPageSource;
+import com.facebook.presto.hive.rcfile.RcFilePageSource;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ColumnMetadata;
 import com.facebook.presto.spi.ConnectorInsertTableHandle;
@@ -70,15 +72,13 @@ import com.facebook.presto.spi.type.SqlTimestamp;
 import com.facebook.presto.spi.type.SqlVarbinary;
 import com.facebook.presto.spi.type.StandardTypes;
 import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.spi.type.TypeSignatureParameter;
+import com.facebook.presto.sql.gen.JoinCompiler;
 import com.facebook.presto.testing.MaterializedResult;
 import com.facebook.presto.testing.MaterializedRow;
 import com.facebook.presto.testing.TestingConnectorSession;
 import com.facebook.presto.type.ArrayType;
 import com.facebook.presto.type.MapType;
-import com.facebook.presto.type.TypeRegistry;
-import com.facebook.presto.util.ImmutableCollectors;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultimap;
@@ -101,6 +101,7 @@ import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -141,6 +142,7 @@ import static com.facebook.presto.hive.HiveTableProperties.STORAGE_FORMAT_PROPER
 import static com.facebook.presto.hive.HiveTestUtils.SESSION;
 import static com.facebook.presto.hive.HiveTestUtils.TYPE_MANAGER;
 import static com.facebook.presto.hive.HiveTestUtils.getDefaultHiveDataStreamFactories;
+import static com.facebook.presto.hive.HiveTestUtils.getDefaultHiveFileWriterFactories;
 import static com.facebook.presto.hive.HiveTestUtils.getDefaultHiveRecordCursorProvider;
 import static com.facebook.presto.hive.HiveTestUtils.getTypes;
 import static com.facebook.presto.hive.HiveType.HIVE_INT;
@@ -173,6 +175,7 @@ import static com.facebook.presto.testing.MaterializedResult.materializeSourceDa
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.concat;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.common.collect.Lists.newArrayList;
@@ -205,6 +208,8 @@ import static org.testng.Assert.fail;
 @Test(groups = "hive")
 public abstract class AbstractTestHiveClient
 {
+    protected static final String TEMPORARY_TABLE_PREFIX = "tmp_presto_test_";
+
     protected static final String INVALID_DATABASE = "totally_invalid_database_name";
     protected static final String INVALID_TABLE = "totally_invalid_table_name";
     protected static final String INVALID_COLUMN = "totally_invalid_column_name";
@@ -308,6 +313,8 @@ public abstract class AbstractTestHiveClient
 
     protected Set<HiveStorageFormat> createTableFormats = difference(ImmutableSet.copyOf(HiveStorageFormat.values()), ImmutableSet.of(AVRO));
 
+    private static final JoinCompiler JOIN_COMPILER = new JoinCompiler();
+
     protected String clientId;
     protected String database;
     protected SchemaTableName tablePartitionFormat;
@@ -321,20 +328,6 @@ public abstract class AbstractTestHiveClient
     protected SchemaTableName tableBucketedDoubleFloat;
     protected SchemaTableName tablePartitionSchemaChange;
     protected SchemaTableName tablePartitionSchemaChangeNonCanonical;
-
-    protected SchemaTableName temporaryCreateTable;
-    protected SchemaTableName temporaryCreateRollbackTable;
-    protected SchemaTableName temporaryCreateEmptyTable;
-    protected SchemaTableName temporaryInsertTable;
-    protected SchemaTableName temporaryInsertIntoNewPartitionTable;
-    protected SchemaTableName temporaryInsertIntoExistingPartitionTable;
-    protected SchemaTableName temporaryInsertUnsupportedWriteType;
-    protected SchemaTableName temporaryMetadataDeleteTable;
-    protected SchemaTableName temporaryRenameTableOld;
-    protected SchemaTableName temporaryRenameTableNew;
-    protected SchemaTableName temporaryCreateView;
-    protected SchemaTableName temporaryDeleteInsert;
-    protected SchemaTableName temporaryMismatchSchemaTable;
 
     protected String invalidClientId;
     protected ConnectorTableHandle invalidTableHandle;
@@ -397,20 +390,6 @@ public abstract class AbstractTestHiveClient
         tableBucketedDoubleFloat = new SchemaTableName(database, "presto_test_bucketed_by_double_float");
         tablePartitionSchemaChange = new SchemaTableName(database, "presto_test_partition_schema_change");
         tablePartitionSchemaChangeNonCanonical = new SchemaTableName(database, "presto_test_partition_schema_change_non_canonical");
-
-        temporaryCreateTable = temporaryTable("create");
-        temporaryCreateRollbackTable = temporaryTable("create_rollback");
-        temporaryCreateEmptyTable = temporaryTable("create_empty");
-        temporaryInsertTable = temporaryTable("insert");
-        temporaryInsertIntoExistingPartitionTable = temporaryTable("insert_existing_partitioned");
-        temporaryInsertIntoNewPartitionTable = temporaryTable("insert_new_partitioned");
-        temporaryInsertUnsupportedWriteType = temporaryTable("insert_unsupported_type");
-        temporaryMetadataDeleteTable = temporaryTable("metadata_delete");
-        temporaryRenameTableOld = temporaryTable("rename_old");
-        temporaryRenameTableNew = temporaryTable("rename_new");
-        temporaryCreateView = temporaryTable("create_view");
-        temporaryDeleteInsert = temporaryTable("delete_insert");
-        temporaryMismatchSchemaTable = temporaryTable("mismatch_schema");
 
         invalidClientId = "hive";
         invalidTableHandle = new HiveTableHandle(invalidClientId, database, INVALID_TABLE);
@@ -503,28 +482,34 @@ public abstract class AbstractTestHiveClient
 
     protected final void setup(String host, int port, String databaseName, String timeZone)
     {
-        setup(host, port, databaseName, timeZone, "hive-test", 100, 50);
-    }
-
-    protected final void setup(String host, int port, String databaseName, String timeZoneId, String connectorName, int maxOutstandingSplits, int maxThreads)
-    {
-        setupHive(connectorName, databaseName, timeZoneId);
-
         HiveClientConfig hiveClientConfig = new HiveClientConfig();
-        hiveClientConfig.setTimeZone(timeZoneId);
+        hiveClientConfig.setTimeZone(timeZone);
         String proxy = System.getProperty("hive.metastore.thrift.client.socks-proxy");
         if (proxy != null) {
             hiveClientConfig.setMetastoreSocksProxy(HostAndPort.fromString(proxy));
         }
 
         HiveCluster hiveCluster = new TestingHiveCluster(hiveClientConfig, host, port);
-        metastoreClient = new CachingHiveMetastore(new BridgingHiveMetastore(new ThriftHiveMetastore(hiveCluster)), executor, Duration.valueOf("1m"), Duration.valueOf("15s"), 10000);
-        HiveConnectorId connectorId = new HiveConnectorId(connectorName);
-        HdfsConfiguration hdfsConfiguration = new HiveHdfsConfiguration(new HdfsConfigurationUpdater(hiveClientConfig, new HiveS3Config()));
+        ExtendedHiveMetastore metastore = new CachingHiveMetastore(
+                new BridgingHiveMetastore(new ThriftHiveMetastore(hiveCluster)),
+                executor,
+                Duration.valueOf("1m"),
+                Duration.valueOf("15s"),
+                10000);
 
+        setup(databaseName, hiveClientConfig, metastore);
+    }
+
+    protected final void setup(String databaseName, HiveClientConfig hiveClientConfig, ExtendedHiveMetastore hiveMetastore)
+    {
+        HiveConnectorId connectorId = new HiveConnectorId("hive-test");
+
+        setupHive(connectorId.toString(), databaseName, hiveClientConfig.getTimeZone());
+
+        metastoreClient = hiveMetastore;
+        HdfsConfiguration hdfsConfiguration = new HiveHdfsConfiguration(new HdfsConfigurationUpdater(hiveClientConfig, new HiveS3Config()));
         hdfsEnvironment = new HdfsEnvironment(hdfsConfiguration, hiveClientConfig, new NoHdfsAuthentication());
         locationService = new HiveLocationService(hdfsEnvironment);
-        TypeManager typeManager = new TypeRegistry();
         JsonCodec<PartitionUpdate> partitionUpdateCodec = JsonCodec.jsonCodec(PartitionUpdate.class);
         metadataFactory = new HiveMetadataFactory(
                 connectorId,
@@ -537,9 +522,10 @@ public abstract class AbstractTestHiveClient
                 true,
                 false,
                 true,
+                false,
                 HiveStorageFormat.RCBINARY,
                 1000,
-                typeManager,
+                TYPE_MANAGER,
                 locationService,
                 new TableParameterCodec(),
                 partitionUpdateCodec,
@@ -554,14 +540,22 @@ public abstract class AbstractTestHiveClient
                 hdfsEnvironment,
                 new HadoopDirectoryLister(),
                 newDirectExecutorService(),
-                new HiveCoercionPolicy(typeManager),
-                maxOutstandingSplits,
+                new HiveCoercionPolicy(TYPE_MANAGER),
+                100,
                 hiveClientConfig.getMinPartitionBatchSize(),
                 hiveClientConfig.getMaxPartitionBatchSize(),
                 hiveClientConfig.getMaxInitialSplits(),
                 false
         );
-        pageSinkProvider = new HivePageSinkProvider(hdfsEnvironment, metastoreClient, new GroupByHashPageIndexerFactory(), typeManager, new HiveClientConfig(), locationService, partitionUpdateCodec);
+        pageSinkProvider = new HivePageSinkProvider(
+                getDefaultHiveFileWriterFactories(hiveClientConfig),
+                hdfsEnvironment,
+                metastoreClient,
+                new GroupByHashPageIndexerFactory(JOIN_COMPILER),
+                TYPE_MANAGER,
+                new HiveClientConfig(),
+                locationService,
+                partitionUpdateCodec);
         pageSourceProvider = new HivePageSourceProvider(hiveClientConfig, hdfsEnvironment, getDefaultHiveRecordCursorProvider(hiveClientConfig), getDefaultHiveDataStreamFactories(hiveClientConfig), TYPE_MANAGER);
     }
 
@@ -790,6 +784,7 @@ public abstract class AbstractTestHiveClient
             if (storageFormat == JSON) {
                 continue;
             }
+            SchemaTableName temporaryMismatchSchemaTable = temporaryTable("mismatch_schema");
             try {
                 doTestMismatchSchemaTable(
                         temporaryMismatchSchemaTable,
@@ -1639,6 +1634,8 @@ public abstract class AbstractTestHiveClient
     @Test
     public void testRenameTable()
     {
+        SchemaTableName temporaryRenameTableOld = temporaryTable("rename_old");
+        SchemaTableName temporaryRenameTableNew = temporaryTable("rename_new");
         try {
             createDummyTable(temporaryRenameTableOld);
 
@@ -1669,6 +1666,7 @@ public abstract class AbstractTestHiveClient
             throws Exception
     {
         for (HiveStorageFormat storageFormat : createTableFormats) {
+            SchemaTableName temporaryCreateTable = temporaryTable("create");
             try {
                 doCreateTable(temporaryCreateTable, storageFormat);
             }
@@ -1682,6 +1680,7 @@ public abstract class AbstractTestHiveClient
     public void testTableCreationRollback()
             throws Exception
     {
+        SchemaTableName temporaryCreateRollbackTable = temporaryTable("create_rollback");
         try {
             Path stagingPathRoot;
             try (Transaction transaction = newTransaction()) {
@@ -1726,6 +1725,7 @@ public abstract class AbstractTestHiveClient
             throws Exception
     {
         for (HiveStorageFormat storageFormat : createTableFormats) {
+            SchemaTableName temporaryInsertTable = temporaryTable("insert");
             try {
                 doInsert(storageFormat, temporaryInsertTable);
             }
@@ -1740,6 +1740,7 @@ public abstract class AbstractTestHiveClient
             throws Exception
     {
         for (HiveStorageFormat storageFormat : createTableFormats) {
+            SchemaTableName temporaryInsertIntoNewPartitionTable = temporaryTable("insert_new_partitioned");
             try {
                 doInsertIntoNewPartition(storageFormat, temporaryInsertIntoNewPartitionTable);
             }
@@ -1754,6 +1755,7 @@ public abstract class AbstractTestHiveClient
             throws Exception
     {
         for (HiveStorageFormat storageFormat : createTableFormats) {
+            SchemaTableName temporaryInsertIntoExistingPartitionTable = temporaryTable("insert_existing_partitioned");
             try {
                 doInsertIntoExistingPartition(storageFormat, temporaryInsertIntoExistingPartitionTable);
             }
@@ -1767,6 +1769,7 @@ public abstract class AbstractTestHiveClient
     public void testInsertUnsupportedWriteType()
             throws Exception
     {
+        SchemaTableName temporaryInsertUnsupportedWriteType = temporaryTable("insert_unsupported_type");
         try {
             doInsertUnsupportedWriteType(ORC, temporaryInsertUnsupportedWriteType);
         }
@@ -1780,6 +1783,7 @@ public abstract class AbstractTestHiveClient
             throws Exception
     {
         for (HiveStorageFormat storageFormat : createTableFormats) {
+            SchemaTableName temporaryMetadataDeleteTable = temporaryTable("metadata_delete");
             try {
                 doTestMetadataDelete(storageFormat, temporaryMetadataDeleteTable);
             }
@@ -1794,6 +1798,7 @@ public abstract class AbstractTestHiveClient
             throws Exception
     {
         for (HiveStorageFormat storageFormat : createTableFormats) {
+            SchemaTableName temporaryCreateEmptyTable = temporaryTable("create_empty");
             try {
                 doCreateEmptyTable(temporaryCreateEmptyTable, storageFormat, CREATE_TABLE_COLUMNS);
             }
@@ -1806,8 +1811,9 @@ public abstract class AbstractTestHiveClient
     @Test
     public void testViewCreation()
     {
+        SchemaTableName temporaryCreateView = temporaryTable("create_view");
         try {
-            verifyViewCreation();
+            verifyViewCreation(temporaryCreateView);
         }
         finally {
             try (Transaction transaction = newTransaction()) {
@@ -1854,7 +1860,7 @@ public abstract class AbstractTestHiveClient
         }
     }
 
-    private void verifyViewCreation()
+    private void verifyViewCreation(SchemaTableName temporaryCreateView)
     {
         // replace works for new view
         doCreateView(temporaryCreateView, true);
@@ -2174,7 +2180,10 @@ public abstract class AbstractTestHiveClient
         FileSystem fileSystem = hdfsEnvironment.getFileSystem("user", path);
         if (fileSystem.exists(path)) {
             for (FileStatus fileStatus : fileSystem.listStatus(path)) {
-                if (HadoopFileStatus.isFile(fileStatus)) {
+                if (fileStatus.getPath().getName().startsWith(".presto")) {
+                    // skip hidden files
+                }
+                else if (HadoopFileStatus.isFile(fileStatus)) {
                     result.add(fileStatus.getPath().toString());
                 }
                 else if (HadoopFileStatus.isDirectory(fileStatus)) {
@@ -2485,7 +2494,7 @@ public abstract class AbstractTestHiveClient
             session = newSession();
             ImmutableList<MaterializedRow> expectedRows = expectedResultBuilder.build().getMaterializedRows().stream()
                     .filter(row -> !"2015-07-03".equals(row.getField(dsColumnOrdinalPosition)))
-                    .collect(ImmutableCollectors.toImmutableList());
+                    .collect(toImmutableList());
             MaterializedResult actualAfterDelete = readTable(transaction, tableHandle, columnHandles, session, TupleDomain.all(), OptionalInt.empty(), Optional.of(storageFormat));
             assertEqualsIgnoreOrder(actualAfterDelete.getMaterializedRows(), expectedRows);
         }
@@ -2916,11 +2925,16 @@ public abstract class AbstractTestHiveClient
     private static Class<? extends ConnectorPageSource> pageSourceType(HiveStorageFormat hiveStorageFormat)
     {
         switch (hiveStorageFormat) {
+            case RCTEXT:
+            case RCBINARY:
+                return RcFilePageSource.class;
             case ORC:
             case DWRF:
                 return OrcPageSource.class;
+            case PARQUET:
+                return ParquetPageSource.class;
             default:
-                throw new AssertionError("Filed type " + hiveStorageFormat + " does not use a page source");
+                throw new AssertionError("File type does not use a PageSource: " + hiveStorageFormat);
         }
     }
 
@@ -3018,7 +3032,7 @@ public abstract class AbstractTestHiveClient
     protected static SchemaTableName temporaryTable(String database, String tableName)
     {
         String randomName = UUID.randomUUID().toString().toLowerCase(ENGLISH).replace("-", "");
-        return new SchemaTableName(database, "tmp_presto_test_" + tableName + "_" + randomName);
+        return new SchemaTableName(database, TEMPORARY_TABLE_PREFIX + tableName + "_" + randomName);
     }
 
     protected static Map<String, Object> createTableProperties(HiveStorageFormat storageFormat)
@@ -3102,41 +3116,36 @@ public abstract class AbstractTestHiveClient
             throws IOException
     {
         FileSystem fileSystem = hdfsEnvironment.getFileSystem(user, path);
-        ImmutableList.Builder<String> result = ImmutableList.builder();
-        for (FileStatus fileStatus : fileSystem.listStatus(path)) {
-            result.add(fileStatus.getPath().getName());
-        }
-        return result.build();
+        return Arrays.stream(fileSystem.listStatus(path))
+                .map(FileStatus::getPath)
+                .map(Path::getName)
+                .filter(name -> !name.startsWith(".presto"))
+                .collect(toList());
     }
 
     @Test
     public void testTransactionDeleteInsert()
             throws Exception
     {
-        try {
-            doTestTransactionDeleteInsert(
-                    RCBINARY,
-                    temporaryDeleteInsert,
-                    true,
-                    ImmutableList.of(
-                            new TransactionDeleteInsertTestCase(false, false, ROLLBACK_RIGHT_AWAY, Optional.empty()),
-                            new TransactionDeleteInsertTestCase(false, false, ROLLBACK_AFTER_DELETE, Optional.empty()),
-                            new TransactionDeleteInsertTestCase(false, false, ROLLBACK_AFTER_BEGIN_INSERT, Optional.empty()),
-                            new TransactionDeleteInsertTestCase(false, false, ROLLBACK_AFTER_APPEND_PAGE, Optional.empty()),
-                            new TransactionDeleteInsertTestCase(false, false, ROLLBACK_AFTER_SINK_FINISH, Optional.empty()),
-                            new TransactionDeleteInsertTestCase(false, false, ROLLBACK_AFTER_FINISH_INSERT, Optional.empty()),
-                            new TransactionDeleteInsertTestCase(false, false, COMMIT, Optional.of(new AddPartitionFailure())),
-                            new TransactionDeleteInsertTestCase(false, false, COMMIT, Optional.of(new DirectoryRenameFailure())),
-                            new TransactionDeleteInsertTestCase(false, false, COMMIT, Optional.of(new FileRenameFailure())),
-                            new TransactionDeleteInsertTestCase(true, false, COMMIT, Optional.of(new DropPartitionFailure())),
-                            new TransactionDeleteInsertTestCase(true, true, COMMIT, Optional.empty())));
-        }
-        finally {
-            dropTable(temporaryDeleteInsert);
-        }
+        doTestTransactionDeleteInsert(
+                RCBINARY,
+                true,
+                ImmutableList.<TransactionDeleteInsertTestCase>builder()
+                        .add(new TransactionDeleteInsertTestCase(false, false, ROLLBACK_RIGHT_AWAY, Optional.empty()))
+                        .add(new TransactionDeleteInsertTestCase(false, false, ROLLBACK_AFTER_DELETE, Optional.empty()))
+                        .add(new TransactionDeleteInsertTestCase(false, false, ROLLBACK_AFTER_BEGIN_INSERT, Optional.empty()))
+                        .add(new TransactionDeleteInsertTestCase(false, false, ROLLBACK_AFTER_APPEND_PAGE, Optional.empty()))
+                        .add(new TransactionDeleteInsertTestCase(false, false, ROLLBACK_AFTER_SINK_FINISH, Optional.empty()))
+                        .add(new TransactionDeleteInsertTestCase(false, false, ROLLBACK_AFTER_FINISH_INSERT, Optional.empty()))
+                        .add(new TransactionDeleteInsertTestCase(false, false, COMMIT, Optional.of(new AddPartitionFailure())))
+                        .add(new TransactionDeleteInsertTestCase(false, false, COMMIT, Optional.of(new DirectoryRenameFailure())))
+                        .add(new TransactionDeleteInsertTestCase(false, false, COMMIT, Optional.of(new FileRenameFailure())))
+                        .add(new TransactionDeleteInsertTestCase(true, false, COMMIT, Optional.of(new DropPartitionFailure())))
+                        .add(new TransactionDeleteInsertTestCase(true, true, COMMIT, Optional.empty()))
+                        .build());
     }
 
-    protected void doTestTransactionDeleteInsert(HiveStorageFormat storageFormat, SchemaTableName tableName, boolean allowInsertExisting, List<TransactionDeleteInsertTestCase> testCases)
+    protected void doTestTransactionDeleteInsert(HiveStorageFormat storageFormat, boolean allowInsertExisting, List<TransactionDeleteInsertTestCase> testCases)
             throws Exception
     {
         // There are 4 types of operations on a partition: add, drop, alter (drop then add), insert existing.
@@ -3185,35 +3194,32 @@ public abstract class AbstractTestHiveClient
                         .rows(insertData.getMaterializedRows())
                         .build();
 
-        boolean dirtyState = true;
         for (TransactionDeleteInsertTestCase testCase : testCases) {
-            if (dirtyState) {
-                // re-initialize the table
-                dropTable(tableName);
+            SchemaTableName temporaryDeleteInsert = temporaryTable("delete_insert");
+            try {
                 createEmptyTable(
-                        tableName,
+                        temporaryDeleteInsert,
                         storageFormat,
                         ImmutableList.of(new Column("col1", HIVE_LONG, Optional.empty())),
                         ImmutableList.of(new Column("pk1", HIVE_STRING, Optional.empty()), new Column("pk2", HIVE_STRING, Optional.empty())));
-                insertData(tableName, beforeData);
-                dirtyState = false;
+                insertData(temporaryDeleteInsert, beforeData);
+                try {
+                    doTestTransactionDeleteInsert(
+                            storageFormat,
+                            temporaryDeleteInsert,
+                            domainToDrop,
+                            insertData,
+                            testCase.isExpectCommitedData() ? afterData : beforeData,
+                            testCase.getTag(),
+                            testCase.isExpectQuerySucceed(),
+                            testCase.getConflictTrigger());
+                }
+                catch (AssertionError e) {
+                    throw new AssertionError(format("Test case: %s", testCase.toString()), e);
+                }
             }
-            try {
-                doTestTransactionDeleteInsert(
-                        storageFormat,
-                        tableName,
-                        domainToDrop,
-                        insertData,
-                        testCase.isExpectCommitedData() ? afterData : beforeData,
-                        testCase.getTag(),
-                        testCase.isExpectQuerySucceed(),
-                        testCase.getConflictTrigger());
-            }
-            catch (AssertionError e) {
-                throw new AssertionError(format("Test case: %s", testCase.toString()), e);
-            }
-            if (testCase.isExpectCommitedData()) {
-                dirtyState = true;
+            finally {
+                dropTable(temporaryDeleteInsert);
             }
         }
     }

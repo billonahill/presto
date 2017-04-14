@@ -48,6 +48,8 @@ import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.ExecutionError;
 import com.google.common.util.concurrent.UncheckedExecutionException;
+import org.weakref.jmx.Managed;
+import org.weakref.jmx.Nested;
 
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
@@ -68,12 +70,14 @@ import static com.facebook.presto.bytecode.expression.BytecodeExpressions.consta
 import static com.facebook.presto.bytecode.expression.BytecodeExpressions.constantLong;
 import static com.facebook.presto.bytecode.expression.BytecodeExpressions.newInstance;
 import static com.facebook.presto.sql.gen.SqlTypeBytecodeExpression.constantType;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 
 public class JoinProbeCompiler
 {
-    private final LoadingCache<JoinOperatorCacheKey, HashJoinOperatorFactoryFactory> joinProbeFactories = CacheBuilder.newBuilder().maximumSize(1000).build(
-            new CacheLoader<JoinOperatorCacheKey, HashJoinOperatorFactoryFactory>()
+    private final LoadingCache<JoinOperatorCacheKey, HashJoinOperatorFactoryFactory> joinProbeFactories = CacheBuilder.newBuilder()
+            .recordStats()
+            .maximumSize(1000)
+            .build(new CacheLoader<JoinOperatorCacheKey, HashJoinOperatorFactoryFactory>()
             {
                 @Override
                 public HashJoinOperatorFactoryFactory load(JoinOperatorCacheKey key)
@@ -82,6 +86,13 @@ public class JoinProbeCompiler
                     return internalCompileJoinOperatorFactory(key.getTypes(), key.getProbeOutputChannels(), key.getProbeChannels(), key.getProbeHashChannel());
                 }
             });
+
+    @Managed
+    @Nested
+    public CacheStatsMBean getJoinProbeFactoriesStats()
+    {
+        return new CacheStatsMBean(joinProbeFactories);
+    }
 
     public OperatorFactory compileJoinOperatorFactory(int operatorId,
             PlanNodeId planNodeId,

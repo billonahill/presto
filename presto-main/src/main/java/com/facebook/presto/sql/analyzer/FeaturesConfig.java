@@ -13,11 +13,13 @@
  */
 package com.facebook.presto.sql.analyzer;
 
+import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import io.airlift.configuration.Config;
 import io.airlift.configuration.ConfigDescription;
 import io.airlift.configuration.DefunctConfig;
 import io.airlift.units.DataSize;
+import io.airlift.units.Duration;
 
 import javax.validation.constraints.Min;
 
@@ -26,6 +28,8 @@ import java.nio.file.Paths;
 import java.util.List;
 
 import static com.facebook.presto.sql.analyzer.RegexLibrary.JONI;
+import static com.google.common.collect.ImmutableList.toImmutableList;
+import static java.util.concurrent.TimeUnit.MINUTES;
 
 @DefunctConfig({
         "resource-group-manager",
@@ -68,9 +72,12 @@ public class FeaturesConfig
     private RegexLibrary regexLibrary = JONI;
     private boolean spillEnabled;
     private DataSize operatorMemoryLimitBeforeSpill = new DataSize(4, DataSize.Unit.MEGABYTE);
-    private Path spillerSpillPath = Paths.get(System.getProperty("java.io.tmpdir"), "presto", "spills");
+    private List<Path> spillerSpillPaths = ImmutableList.of();
     private int spillerThreads = 4;
-    private boolean iterativeOptimizerEnabled;
+    private double spillMaxUsedSpaceThreshold = 0.9;
+    private boolean iterativeOptimizerEnabled = true;
+
+    private Duration iterativeOptimizerTimeout = new Duration(3, MINUTES); // by default let optimizer wait a long time in case it retrieves some data from ConnectorMetadata
 
     public boolean isResourceGroupsEnabled()
     {
@@ -218,18 +225,6 @@ public class FeaturesConfig
         return this;
     }
 
-    public boolean isReorderWindows()
-    {
-        return optimizerReorderWindows;
-    }
-
-    @Config("optimizer.reorder-windows")
-    public FeaturesConfig setReorderWindows(boolean reorderWindows)
-    {
-        this.optimizerReorderWindows = reorderWindows;
-        return this;
-    }
-
     public boolean isPushTableWriteThroughUnion()
     {
         return pushTableWriteThroughUnion;
@@ -331,6 +326,18 @@ public class FeaturesConfig
         return this;
     }
 
+    public Duration getIterativeOptimizerTimeout()
+    {
+        return iterativeOptimizerTimeout;
+    }
+
+    @Config("experimental.iterative-optimizer-timeout")
+    public FeaturesConfig setIterativeOptimizerTimeout(Duration timeout)
+    {
+        this.iterativeOptimizerTimeout = timeout;
+        return this;
+    }
+
     public DataSize getOperatorMemoryLimitBeforeSpill()
     {
         return operatorMemoryLimitBeforeSpill;
@@ -343,15 +350,16 @@ public class FeaturesConfig
         return this;
     }
 
-    public Path getSpillerSpillPath()
+    public List<Path> getSpillerSpillPaths()
     {
-        return spillerSpillPath;
+        return spillerSpillPaths;
     }
 
     @Config("experimental.spiller-spill-path")
-    public FeaturesConfig setSpillerSpillPath(String spillPath)
+    public FeaturesConfig setSpillerSpillPaths(String spillPaths)
     {
-        this.spillerSpillPath = Paths.get(spillPath);
+        List<String> spillPathsSplit = ImmutableList.copyOf(Splitter.on(",").trimResults().omitEmptyStrings().split(spillPaths));
+        this.spillerSpillPaths = spillPathsSplit.stream().map(path -> Paths.get(path)).collect(toImmutableList());
         return this;
     }
 
@@ -364,6 +372,18 @@ public class FeaturesConfig
     public FeaturesConfig setSpillerThreads(int spillerThreads)
     {
         this.spillerThreads = spillerThreads;
+        return this;
+    }
+
+    public double getSpillMaxUsedSpaceThreshold()
+    {
+        return spillMaxUsedSpaceThreshold;
+    }
+
+    @Config("experimental.spiller-max-used-space-threshold")
+    public FeaturesConfig setSpillMaxUsedSpaceThreshold(double spillMaxUsedSpaceThreshold)
+    {
+        this.spillMaxUsedSpaceThreshold = spillMaxUsedSpaceThreshold;
         return this;
     }
 

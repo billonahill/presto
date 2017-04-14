@@ -15,7 +15,6 @@ package com.facebook.presto.operator;
 
 import com.facebook.presto.Session;
 import com.facebook.presto.execution.TaskId;
-import com.facebook.presto.util.ImmutableCollectors;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -41,6 +40,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Iterables.transform;
 import static io.airlift.units.DataSize.succinctBytes;
 import static java.util.Objects.requireNonNull;
@@ -51,6 +51,7 @@ public class PipelineContext
 {
     private final TaskContext taskContext;
     private final Executor executor;
+    private final int pipelineId;
 
     private final boolean inputPipeline;
     private final boolean outputPipeline;
@@ -85,8 +86,9 @@ public class PipelineContext
 
     private final ConcurrentMap<Integer, OperatorStats> operatorSummaries = new ConcurrentHashMap<>();
 
-    public PipelineContext(TaskContext taskContext, Executor executor, boolean inputPipeline, boolean outputPipeline)
+    public PipelineContext(int pipelineId, TaskContext taskContext, Executor executor, boolean inputPipeline, boolean outputPipeline)
     {
+        this.pipelineId = pipelineId;
         this.inputPipeline = inputPipeline;
         this.outputPipeline = outputPipeline;
         this.taskContext = requireNonNull(taskContext, "taskContext is null");
@@ -101,6 +103,11 @@ public class PipelineContext
     public TaskId getTaskId()
     {
         return taskContext.getTaskId();
+    }
+
+    public int getPipelineId()
+    {
+        return pipelineId;
     }
 
     public boolean isInputPipeline()
@@ -223,6 +230,11 @@ public class PipelineContext
         return future;
     }
 
+    public synchronized ListenableFuture<?> reserveSpill(long bytes)
+    {
+        return taskContext.reserveSpill(bytes);
+    }
+
     public synchronized boolean tryReserveMemory(long bytes)
     {
         if (taskContext.tryReserveMemory(bytes)) {
@@ -246,6 +258,12 @@ public class PipelineContext
         checkArgument(bytes <= systemMemoryReservation.get(), "tried to free more memory than is reserved");
         taskContext.freeSystemMemory(bytes);
         systemMemoryReservation.getAndAdd(-bytes);
+    }
+
+    public synchronized void freeSpill(long bytes)
+    {
+        checkArgument(bytes >= 0, "bytes is negative");
+        taskContext.freeSpill(bytes);
     }
 
     public void moreMemoryAvailable()
@@ -398,11 +416,13 @@ public class PipelineContext
         ImmutableSet<BlockedReason> blockedReasons = drivers.stream()
                 .filter(driver -> driver.getEndTime() == null && driver.getStartTime() != null)
                 .flatMap(driver -> driver.getBlockedReasons().stream())
-                .collect(ImmutableCollectors.toImmutableSet());
+                .collect(toImmutableSet());
         boolean fullyBlocked = drivers.stream()
                 .filter(driver -> driver.getEndTime() == null && driver.getStartTime() != null)
                 .allMatch(DriverStats::isFullyBlocked);
         return new PipelineStats(
+                pipelineId,
+
                 executionStartTime.get(),
                 lastExecutionStartTime.get(),
                 lastExecutionEndTime.get(),

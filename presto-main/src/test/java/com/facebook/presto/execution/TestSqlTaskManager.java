@@ -28,6 +28,8 @@ import com.facebook.presto.operator.ExchangeClient;
 import com.facebook.presto.operator.ExchangeClientSupplier;
 import com.facebook.presto.spi.Node;
 import com.facebook.presto.spi.QueryId;
+import com.facebook.presto.spiller.LocalSpillManager;
+import com.facebook.presto.spiller.NodeSpillConfig;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import io.airlift.json.ObjectMapperProvider;
@@ -63,10 +65,12 @@ public class TestSqlTaskManager
 
     private final TaskExecutor taskExecutor;
     private final LocalMemoryManager localMemoryManager;
+    private final LocalSpillManager localSpillManager;
 
     public TestSqlTaskManager()
     {
         localMemoryManager = new LocalMemoryManager(new NodeMemoryConfig(), new ReservedSystemMemoryConfig());
+        localSpillManager = new LocalSpillManager(new NodeSpillConfig());
         taskExecutor = new TaskExecutor(8, 16);
         taskExecutor.start();
     }
@@ -277,7 +281,9 @@ public class TestSqlTaskManager
                 new NodeInfo("test"),
                 localMemoryManager,
                 config,
-                new NodeMemoryConfig());
+                new NodeMemoryConfig(),
+                localSpillManager,
+                new NodeSpillConfig());
     }
 
     public static class MockExchangeClientSupplier
@@ -296,31 +302,31 @@ public class TestSqlTaskManager
         @Override
         public URI createQueryLocation(QueryId queryId)
         {
-            return URI.create("fake://query/" + queryId);
+            return URI.create("http://fake.invalid/query/" + queryId);
         }
 
         @Override
         public URI createStageLocation(StageId stageId)
         {
-            return URI.create("fake://stage/" + stageId);
+            return URI.create("http://fake.invalid/stage/" + stageId);
         }
 
         @Override
         public URI createLocalTaskLocation(TaskId taskId)
         {
-            return URI.create("fake://task/" + taskId);
+            return URI.create("http://fake.invalid/task/" + taskId);
         }
 
         @Override
         public URI createTaskLocation(Node node, TaskId taskId)
         {
-            return URI.create("fake://task/" + node.getNodeIdentifier() + "/" + taskId);
+            return URI.create("http://fake.invalid/task/" + node.getNodeIdentifier() + "/" + taskId);
         }
 
         @Override
         public URI createMemoryInfoLocation(Node node)
         {
-            return URI.create("fake://" + node.getNodeIdentifier() + "/memory");
+            return URI.create("http://fake.invalid/" + node.getNodeIdentifier() + "/memory");
         }
     }
 }

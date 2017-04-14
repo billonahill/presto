@@ -24,6 +24,7 @@ import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.SymbolAllocator;
 import com.facebook.presto.sql.planner.plan.AggregationNode;
 import com.facebook.presto.sql.planner.plan.ApplyNode;
+import com.facebook.presto.sql.planner.plan.AssignUniqueId;
 import com.facebook.presto.sql.planner.plan.Assignments;
 import com.facebook.presto.sql.planner.plan.DeleteNode;
 import com.facebook.presto.sql.planner.plan.DistinctLimitNode;
@@ -76,9 +77,9 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableSet;
 import static com.google.common.base.Predicates.in;
+import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Iterables.concat;
 import static com.google.common.collect.Sets.intersection;
 import static java.util.Objects.requireNonNull;
@@ -216,7 +217,7 @@ public class PruneUnreferencedOutputs
                         .collect(toImmutableList());
             }
 
-            return new JoinNode(node.getId(), node.getType(), left, right, node.getCriteria(), outputSymbols, node.getFilter(), node.getLeftHashSymbol(), node.getRightHashSymbol());
+            return new JoinNode(node.getId(), node.getType(), left, right, node.getCriteria(), outputSymbols, node.getFilter(), node.getLeftHashSymbol(), node.getRightHashSymbol(), node.getDistributionType());
         }
 
         @Override
@@ -246,7 +247,8 @@ public class PruneUnreferencedOutputs
                     node.getFilteringSourceJoinSymbol(),
                     node.getSemiJoinOutput(),
                     node.getSourceHashSymbol(),
-                    node.getFilteringSourceHashSymbol());
+                    node.getFilteringSourceHashSymbol(),
+                    node.getDistributionType());
         }
 
         @Override
@@ -758,6 +760,15 @@ public class PruneUnreferencedOutputs
                     .build();
             PlanNode input = context.rewrite(node.getInput(), inputContext);
             return new ApplyNode(node.getId(), input, subquery, subqueryAssignments.build(), newCorrelation);
+        }
+
+        @Override
+        public PlanNode visitAssignUniqueId(AssignUniqueId node, RewriteContext<Set<Symbol>> context)
+        {
+            if (!context.get().contains(node.getIdColumn())) {
+                return context.rewrite(node.getSource(), context.get());
+            }
+            return context.defaultRewrite(node, context.get());
         }
     }
 }

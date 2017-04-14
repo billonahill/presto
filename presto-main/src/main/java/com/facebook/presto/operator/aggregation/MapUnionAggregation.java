@@ -37,8 +37,8 @@ import static com.facebook.presto.operator.aggregation.AggregationMetadata.Param
 import static com.facebook.presto.operator.aggregation.AggregationMetadata.ParameterMetadata.ParameterType.STATE;
 import static com.facebook.presto.operator.aggregation.AggregationUtils.generateAggregationName;
 import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.facebook.presto.util.Reflection.methodHandle;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 
 public class MapUnionAggregation
         extends SqlAggregationFunction
@@ -73,7 +73,7 @@ public class MapUnionAggregation
         DynamicClassLoader classLoader = new DynamicClassLoader(MapUnionAggregation.class.getClassLoader());
         Type outputType = new MapType(keyType, valueType);
         List<Type> inputTypes = ImmutableList.of(outputType);
-        KeyValuePairStateSerializer stateSerializer = new KeyValuePairStateSerializer(keyType, valueType, false);
+        KeyValuePairStateSerializer stateSerializer = new KeyValuePairStateSerializer(keyType, valueType);
         Type intermediateType = stateSerializer.getSerializedType();
 
         AggregationMetadata metadata = new AggregationMetadata(

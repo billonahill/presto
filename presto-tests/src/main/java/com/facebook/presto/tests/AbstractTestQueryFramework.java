@@ -31,6 +31,7 @@ import com.google.common.collect.ImmutableMap;
 import org.intellij.lang.annotations.Language;
 import org.testng.SkipException;
 import org.testng.annotations.AfterClass;
+import org.testng.annotations.BeforeClass;
 import org.weakref.jmx.MBeanExporter;
 import org.weakref.jmx.testing.TestingMBeanServer;
 
@@ -40,34 +41,45 @@ import java.util.OptionalLong;
 
 import static com.facebook.presto.sql.SqlFormatter.formatSql;
 import static com.facebook.presto.transaction.TransactionBuilder.transaction;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
+import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableList.toImmutableList;
+import static io.airlift.testing.Closeables.closeAllRuntimeException;
 import static java.lang.String.format;
 import static java.util.Collections.emptyList;
+import static java.util.Objects.requireNonNull;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.fail;
 
 public abstract class AbstractTestQueryFramework
 {
-    protected final H2QueryRunner h2QueryRunner;
-    protected final QueryRunner queryRunner;
-    private final SqlParser sqlParser;
+    private QueryRunnerSupplier queryRunnerSupplier;
+    private QueryRunner queryRunner;
+    private H2QueryRunner h2QueryRunner;
+    private SqlParser sqlParser;
 
-    protected AbstractTestQueryFramework(QueryRunner queryRunner)
+    protected AbstractTestQueryFramework(QueryRunnerSupplier supplier)
     {
-        this.queryRunner = queryRunner;
+        this.queryRunnerSupplier = requireNonNull(supplier, "queryRunnerSupplier is null");
+    }
+
+    @BeforeClass
+    public void init()
+            throws Exception
+    {
+        queryRunner = queryRunnerSupplier.get();
         h2QueryRunner = new H2QueryRunner();
         sqlParser = new SqlParser();
     }
 
     @AfterClass(alwaysRun = true)
     public void close()
+            throws Exception
     {
-        try {
-            h2QueryRunner.close();
-        }
-        finally {
-            queryRunner.close();
-        }
+        closeAllRuntimeException(queryRunner, h2QueryRunner);
+        queryRunner = null;
+        h2QueryRunner = null;
+        sqlParser = null;
+        queryRunnerSupplier = null;
     }
 
     protected Session getSession()
@@ -162,16 +174,12 @@ public abstract class AbstractTestQueryFramework
 
     protected void assertQueryFails(Session session, @Language("SQL") String sql, @Language("RegExp") String expectedMessageRegExp)
     {
-        queryRunner.getExclusiveLock().lock();
         try {
             queryRunner.execute(session, sql);
             fail(format("Expected query to fail: %s", sql));
         }
         catch (RuntimeException ex) {
             assertExceptionMessage(sql, ex, expectedMessageRegExp);
-        }
-        finally {
-            queryRunner.getExclusiveLock().unlock();
         }
     }
 
@@ -182,15 +190,15 @@ public abstract class AbstractTestQueryFramework
 
     protected void assertAccessAllowed(Session session, @Language("SQL") String sql, TestingPrivilege... deniedPrivileges)
     {
-        queryRunner.getExclusiveLock().lock();
-        try {
-            queryRunner.getAccessControl().deny(deniedPrivileges);
-            queryRunner.execute(session, sql);
-        }
-        finally {
-            queryRunner.getAccessControl().reset();
-            queryRunner.getExclusiveLock().unlock();
-        }
+        executeExclusively(() -> {
+            try {
+                queryRunner.getAccessControl().deny(deniedPrivileges);
+                queryRunner.execute(session, sql);
+            }
+            finally {
+                queryRunner.getAccessControl().reset();
+            }
+        });
     }
 
     protected void assertAccessDenied(@Language("SQL") String sql, @Language("RegExp") String exceptionsMessageRegExp, TestingPrivilege... deniedPrivileges)
@@ -204,19 +212,19 @@ public abstract class AbstractTestQueryFramework
             @Language("RegExp") String exceptionsMessageRegExp,
             TestingPrivilege... deniedPrivileges)
     {
-        queryRunner.getExclusiveLock().lock();
-        try {
-            queryRunner.getAccessControl().deny(deniedPrivileges);
-            queryRunner.execute(session, sql);
-            fail("Expected " + AccessDeniedException.class.getSimpleName());
-        }
-        catch (RuntimeException e) {
-            assertExceptionMessage(sql, e, ".*Access Denied: " + exceptionsMessageRegExp);
-        }
-        finally {
-            queryRunner.getAccessControl().reset();
-            queryRunner.getExclusiveLock().unlock();
-        }
+        executeExclusively(() -> {
+            try {
+                queryRunner.getAccessControl().deny(deniedPrivileges);
+                queryRunner.execute(session, sql);
+                fail("Expected " + AccessDeniedException.class.getSimpleName());
+            }
+            catch (RuntimeException e) {
+                assertExceptionMessage(sql, e, ".*Access Denied: " + exceptionsMessageRegExp);
+            }
+            finally {
+                queryRunner.getAccessControl().reset();
+            }
+        });
     }
 
     protected void assertTableColumnNames(String tableName, String... columnNames)
@@ -239,6 +247,17 @@ public abstract class AbstractTestQueryFramework
     protected MaterializedResult computeExpected(@Language("SQL") String sql, List<? extends Type> resultTypes)
     {
         return h2QueryRunner.execute(getSession(), sql, resultTypes);
+    }
+
+    protected void executeExclusively(Runnable executionBlock)
+    {
+        queryRunner.getExclusiveLock().lock();
+        try {
+            executionBlock.run();
+        }
+        finally {
+            queryRunner.getExclusiveLock().unlock();
+        }
     }
 
     protected String formatSqlText(String sql)
@@ -285,5 +304,17 @@ public abstract class AbstractTestQueryFramework
         if (!requirement) {
             throw new SkipException("requirement not met");
         }
+    }
+
+    protected QueryRunner getQueryRunner()
+    {
+        checkState(queryRunner != null, "queryRunner not set");
+        return queryRunner;
+    }
+
+    public interface QueryRunnerSupplier
+    {
+        QueryRunner get()
+                throws Exception;
     }
 }

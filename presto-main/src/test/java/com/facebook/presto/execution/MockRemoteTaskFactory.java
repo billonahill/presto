@@ -19,8 +19,6 @@ import com.facebook.presto.connector.ConnectorId;
 import com.facebook.presto.execution.NodeTaskMap.PartitionedSplitCountTracker;
 import com.facebook.presto.execution.buffer.LazyOutputBuffer;
 import com.facebook.presto.execution.buffer.OutputBuffer;
-import com.facebook.presto.execution.buffer.PagesSerdeFactory;
-import com.facebook.presto.execution.buffer.TestingPagesSerdeFactory;
 import com.facebook.presto.memory.MemoryPool;
 import com.facebook.presto.memory.QueryContext;
 import com.facebook.presto.metadata.Split;
@@ -30,6 +28,7 @@ import com.facebook.presto.operator.TaskStats;
 import com.facebook.presto.spi.Node;
 import com.facebook.presto.spi.memory.MemoryPoolId;
 import com.facebook.presto.spi.predicate.TupleDomain;
+import com.facebook.presto.spiller.SpillSpaceTracker;
 import com.facebook.presto.sql.planner.Partitioning;
 import com.facebook.presto.sql.planner.PartitioningScheme;
 import com.facebook.presto.sql.planner.PlanFragment;
@@ -46,6 +45,8 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimap;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
 import io.airlift.units.DataSize;
 import org.joda.time.DateTime;
 
@@ -61,7 +62,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
@@ -74,7 +74,7 @@ import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.SINGLE_DISTRIBUTION;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.SOURCE_DISTRIBUTION;
 import static com.facebook.presto.util.Failures.toFailures;
-import static io.airlift.concurrent.MoreFutures.unmodifiableFuture;
+import static com.google.common.util.concurrent.Futures.nonCancellationPropagating;
 import static io.airlift.units.DataSize.Unit.BYTE;
 import static io.airlift.units.DataSize.Unit.GIGABYTE;
 import static io.airlift.units.DataSize.Unit.MEGABYTE;
@@ -134,8 +134,6 @@ public class MockRemoteTaskFactory
     public static final class MockRemoteTask
             implements RemoteTask
     {
-        private static final PagesSerdeFactory PAGES_SERDE_FACTORY = new TestingPagesSerdeFactory();
-
         private final AtomicLong nextTaskInfoVersion = new AtomicLong(TaskStatus.STARTING_VERSION);
 
         private final URI location;
@@ -156,7 +154,7 @@ public class MockRemoteTaskFactory
         private int runningDrivers = 0;
 
         @GuardedBy("this")
-        private CompletableFuture<?> whenSplitQueueHasSpace = new CompletableFuture<>();
+        private SettableFuture<?> whenSplitQueueHasSpace = SettableFuture.create();
 
         private final PartitionedSplitCountTracker partitionedSplitCountTracker;
 
@@ -171,7 +169,8 @@ public class MockRemoteTaskFactory
 
             MemoryPool memoryPool = new MemoryPool(new MemoryPoolId("test"), new DataSize(1, GIGABYTE));
             MemoryPool memorySystemPool = new MemoryPool(new MemoryPoolId("testSystem"), new DataSize(1, GIGABYTE));
-            QueryContext queryContext = new QueryContext(taskId.getQueryId(), new DataSize(1, MEGABYTE), memoryPool, memorySystemPool, executor);
+            SpillSpaceTracker spillSpaceTracker = new SpillSpaceTracker(new DataSize(1, GIGABYTE));
+            QueryContext queryContext = new QueryContext(taskId.getQueryId(), new DataSize(1, MEGABYTE), memoryPool, memorySystemPool, executor, new DataSize(1, MEGABYTE), spillSpaceTracker);
             this.taskContext = queryContext.addTaskContext(taskStateMachine, TEST_SESSION, true, true);
 
             this.location = URI.create("fake://task/" + taskId);
@@ -240,12 +239,12 @@ public class MockRemoteTaskFactory
         {
             if (getQueuedPartitionedSplitCount() < 9) {
                 if (!whenSplitQueueHasSpace.isDone()) {
-                    whenSplitQueueHasSpace.complete(null);
+                    whenSplitQueueHasSpace.set(null);
                 }
             }
             else {
                 if (whenSplitQueueHasSpace.isDone()) {
-                    whenSplitQueueHasSpace = new CompletableFuture<>();
+                    whenSplitQueueHasSpace = SettableFuture.create();
                 }
             }
         }
@@ -326,9 +325,9 @@ public class MockRemoteTaskFactory
         }
 
         @Override
-        public synchronized CompletableFuture<?> whenSplitQueueHasSpace(int threshold)
+        public synchronized ListenableFuture<?> whenSplitQueueHasSpace(int threshold)
         {
-            return unmodifiableFuture(whenSplitQueueHasSpace);
+            return nonCancellationPropagating(whenSplitQueueHasSpace);
         }
 
         @Override

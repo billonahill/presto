@@ -40,12 +40,6 @@ public class IndexLookupSource
     }
 
     @Override
-    public boolean isEmpty()
-    {
-        return false;
-    }
-
-    @Override
     public int getChannelCount()
     {
         return indexLoader.getChannelCount();
@@ -92,6 +86,12 @@ public class IndexLookupSource
         checkState(nextPosition != UNLOADED_INDEX_KEY);
         // INVARIANT: currentPosition is -1 or a valid currentPosition greater than or equal to zero
         return nextPosition;
+    }
+
+    @Override
+    public boolean isJoinPositionEligible(long currentJoinPosition, int probePosition, Page allProbeChannelsPage)
+    {
+        return true;
     }
 
     @Override

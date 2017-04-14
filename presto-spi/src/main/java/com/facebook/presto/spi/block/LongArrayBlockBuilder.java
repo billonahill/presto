@@ -28,7 +28,7 @@ import static java.util.Objects.requireNonNull;
 public class LongArrayBlockBuilder
         implements BlockBuilder
 {
-    private static final int INSTANCE_SIZE = ClassLayout.parseClass(LongArrayBlockBuilder.class).instanceSize();
+    private static final int INSTANCE_SIZE = ClassLayout.parseClass(LongArrayBlockBuilder.class).instanceSize() + BlockBuilderStatus.INSTANCE_SIZE;
 
     private BlockBuilderStatus blockBuilderStatus;
 
@@ -103,6 +103,12 @@ public class LongArrayBlockBuilder
         updateDataSize();
     }
 
+    @Override
+    public BlockBuilder newBlockBuilderLike(BlockBuilderStatus blockBuilderStatus)
+    {
+        return new LongArrayBlockBuilder(blockBuilderStatus, calculateBlockResetSize(positionCount));
+    }
+
     private void growCapacity()
     {
         int newSize = BlockUtil.calculateNewArraySize(values.length);
@@ -124,6 +130,12 @@ public class LongArrayBlockBuilder
     }
 
     @Override
+    public int getRegionSizeInBytes(int position, int length)
+    {
+        return intSaturatedCast((Long.BYTES + Byte.BYTES) * (long) length);
+    }
+
+    @Override
     public int getRetainedSizeInBytes()
     {
         return retainedSizeInBytes;
@@ -133,12 +145,6 @@ public class LongArrayBlockBuilder
     public int getPositionCount()
     {
         return positionCount;
-    }
-
-    @Override
-    public int getLength(int position)
-    {
-        return Long.BYTES;
     }
 
     @Override

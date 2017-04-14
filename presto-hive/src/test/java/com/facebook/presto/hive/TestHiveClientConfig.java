@@ -67,6 +67,7 @@ public class TestHiveClientConfig
                 .setRespectTableFormat(true)
                 .setImmutablePartitions(false)
                 .setMaxPartitionsPerWriter(100)
+                .setWriteValidationThreads(16)
                 .setUseParquetColumnNames(false)
                 .setUseOrcColumnNames(false)
                 .setParquetPredicatePushdownEnabled(false)
@@ -76,7 +77,8 @@ public class TestHiveClientConfig
                 .setOrcMaxMergeDistance(new DataSize(1, Unit.MEGABYTE))
                 .setOrcMaxBufferSize(new DataSize(8, Unit.MEGABYTE))
                 .setOrcStreamBufferSize(new DataSize(8, Unit.MEGABYTE))
-                .setRcfileOptimizedReaderEnabled(false)
+                .setRcfileOptimizedReaderEnabled(true)
+                .setRcfileOptimizedWriterEnabled(false)
                 .setHiveMetastoreAuthenticationType(HiveClientConfig.HiveMetastoreAuthenticationType.NONE)
                 .setHiveMetastoreServicePrincipal(null)
                 .setHiveMetastoreClientPrincipal(null)
@@ -88,7 +90,8 @@ public class TestHiveClientConfig
                 .setSkipDeletionForAlter(false)
                 .setBucketExecutionEnabled(true)
                 .setBucketWritingEnabled(true)
-                .setFileSystemMaxCacheSize(1000));
+                .setFileSystemMaxCacheSize(1000)
+                .setWritesToNonManagedTablesEnabled(false));
     }
 
     @Test
@@ -126,6 +129,7 @@ public class TestHiveClientConfig
                 .put("hive.respect-table-format", "false")
                 .put("hive.immutable-partitions", "true")
                 .put("hive.max-partitions-per-writers", "222")
+                .put("hive.write-validation-threads", "11")
                 .put("hive.force-local-scheduling", "true")
                 .put("hive.max-concurrent-file-renames", "100")
                 .put("hive.assume-canonical-partition-keys", "true")
@@ -137,7 +141,8 @@ public class TestHiveClientConfig
                 .put("hive.orc.max-merge-distance", "22kB")
                 .put("hive.orc.max-buffer-size", "44kB")
                 .put("hive.orc.stream-buffer-size", "55kB")
-                .put("hive.rcfile-optimized-reader.enabled", "true")
+                .put("hive.rcfile-optimized-reader.enabled", "false")
+                .put("hive.rcfile-optimized-writer.enabled", "true")
                 .put("hive.metastore.authentication.type", "KERBEROS")
                 .put("hive.metastore.service.principal", "hive/_HOST@EXAMPLE.COM")
                 .put("hive.metastore.client.principal", "metastore@EXAMPLE.COM")
@@ -150,6 +155,7 @@ public class TestHiveClientConfig
                 .put("hive.bucket-execution", "false")
                 .put("hive.bucket-writing", "false")
                 .put("hive.fs.cache.max-size", "1010")
+                .put("hive.non-managed-table-writes-enabled", "true")
                 .build();
 
         HiveClientConfig expected = new HiveClientConfig()
@@ -185,6 +191,7 @@ public class TestHiveClientConfig
                 .setRespectTableFormat(false)
                 .setImmutablePartitions(true)
                 .setMaxPartitionsPerWriter(222)
+                .setWriteValidationThreads(11)
                 .setDomainSocketPath("/foo")
                 .setUseParquetColumnNames(true)
                 .setUseOrcColumnNames(true)
@@ -195,7 +202,8 @@ public class TestHiveClientConfig
                 .setOrcMaxMergeDistance(new DataSize(22, Unit.KILOBYTE))
                 .setOrcMaxBufferSize(new DataSize(44, Unit.KILOBYTE))
                 .setOrcStreamBufferSize(new DataSize(55, Unit.KILOBYTE))
-                .setRcfileOptimizedReaderEnabled(true)
+                .setRcfileOptimizedReaderEnabled(false)
+                .setRcfileOptimizedWriterEnabled(true)
                 .setHiveMetastoreAuthenticationType(HiveClientConfig.HiveMetastoreAuthenticationType.KERBEROS)
                 .setHiveMetastoreServicePrincipal("hive/_HOST@EXAMPLE.COM")
                 .setHiveMetastoreClientPrincipal("metastore@EXAMPLE.COM")
@@ -207,7 +215,8 @@ public class TestHiveClientConfig
                 .setSkipDeletionForAlter(true)
                 .setBucketExecutionEnabled(false)
                 .setBucketWritingEnabled(false)
-                .setFileSystemMaxCacheSize(1010);
+                .setFileSystemMaxCacheSize(1010)
+                .setWritesToNonManagedTablesEnabled(true);
 
         ConfigAssertions.assertFullMapping(properties, expected);
     }

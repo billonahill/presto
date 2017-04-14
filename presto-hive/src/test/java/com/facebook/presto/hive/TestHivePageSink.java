@@ -26,6 +26,7 @@ import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.predicate.TupleDomain;
 import com.facebook.presto.spi.type.Type;
+import com.facebook.presto.sql.gen.JoinCompiler;
 import com.facebook.presto.testing.MaterializedResult;
 import com.facebook.presto.testing.TestingConnectorSession;
 import com.google.common.base.Joiner;
@@ -56,6 +57,7 @@ import static com.facebook.presto.hive.HiveCompressionCodec.NONE;
 import static com.facebook.presto.hive.HiveTestUtils.TYPE_MANAGER;
 import static com.facebook.presto.hive.HiveTestUtils.createTestHdfsEnvironment;
 import static com.facebook.presto.hive.HiveTestUtils.getDefaultHiveDataStreamFactories;
+import static com.facebook.presto.hive.HiveTestUtils.getDefaultHiveFileWriterFactories;
 import static com.facebook.presto.hive.HiveTestUtils.getDefaultHiveRecordCursorProvider;
 import static com.facebook.presto.hive.HiveType.HIVE_DATE;
 import static com.facebook.presto.hive.HiveType.HIVE_DOUBLE;
@@ -67,6 +69,7 @@ import static com.facebook.presto.spi.type.DateType.DATE;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.IntegerType.INTEGER;
 import static com.facebook.presto.spi.type.VarcharType.createUnboundedVarcharType;
+import static com.facebook.presto.testing.assertions.Assert.assertEquals;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static io.airlift.concurrent.MoreFutures.getFutureValue;
 import static io.airlift.testing.Assertions.assertGreaterThan;
@@ -74,7 +77,6 @@ import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.FILE_INPUT_FORMAT;
 import static org.apache.hadoop.hive.serde.serdeConstants.SERIALIZATION_LIB;
-import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
 
 public class TestHivePageSink
@@ -227,7 +229,15 @@ public class TestHivePageSink
                 ImmutableMap.of());
         JsonCodec<PartitionUpdate> partitionUpdateCodec = JsonCodec.jsonCodec(PartitionUpdate.class);
         HdfsEnvironment hdfsEnvironment = createTestHdfsEnvironment(config);
-        HivePageSinkProvider provider = new HivePageSinkProvider(hdfsEnvironment, metastore, new GroupByHashPageIndexerFactory(), TYPE_MANAGER, config, new HiveLocationService(hdfsEnvironment), partitionUpdateCodec);
+        HivePageSinkProvider provider = new HivePageSinkProvider(
+                getDefaultHiveFileWriterFactories(config),
+                hdfsEnvironment,
+                metastore,
+                new GroupByHashPageIndexerFactory(new JoinCompiler()),
+                TYPE_MANAGER,
+                config,
+                new HiveLocationService(hdfsEnvironment),
+                partitionUpdateCodec);
         return provider.createPageSink(transaction, getSession(config), handle);
     }
 

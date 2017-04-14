@@ -32,6 +32,7 @@ import static com.facebook.presto.spi.session.PropertyMetadata.booleanSessionPro
 import static com.facebook.presto.spi.session.PropertyMetadata.integerSessionProperty;
 import static com.facebook.presto.spi.session.PropertyMetadata.stringSessionProperty;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.lang.String.format;
@@ -66,8 +67,8 @@ public final class SystemSessionProperties
     public static final String OPERATOR_MEMORY_LIMIT_BEFORE_SPILL = "operator_memory_limit_before_spill";
     public static final String OPTIMIZE_DISTINCT_AGGREGATIONS = "optimize_mixed_distinct_aggregations";
     public static final String LEGACY_ORDER_BY = "legacy_order_by";
-    public static final String REORDER_WINDOWS = "reorder_windows";
     public static final String ITERATIVE_OPTIMIZER = "iterative_optimizer_enabled";
+    public static final String ITERATIVE_OPTIMIZER_TIMEOUT = "iterative_optimizer_timeout";
     public static final String EXCHANGE_COMPRESSION = "exchange_compression";
 
     private final List<PropertyMetadata<?>> sessionProperties;
@@ -245,11 +246,23 @@ public final class SystemSessionProperties
                         "Experimental: Use a colocated join when possible",
                         featuresConfig.isColocatedJoinsEnabled(),
                         false),
-                booleanSessionProperty(
+                new PropertyMetadata<>(
                         SPILL_ENABLED,
                         "Experimental: Enable spilling",
+                        BOOLEAN,
+                        Boolean.class,
                         featuresConfig.isSpillEnabled(),
-                        false),
+                        false,
+                        value -> {
+                            boolean spillEnabled = (Boolean) value;
+                            if (spillEnabled && featuresConfig.getSpillerSpillPaths().isEmpty()) {
+                                throw new PrestoException(
+                                        StandardErrorCode.INVALID_SESSION_PROPERTY,
+                                        format("%s cannot be set to true; no spill paths configured", SPILL_ENABLED));
+                            }
+                            return spillEnabled;
+                        },
+                        value -> value),
                 new PropertyMetadata<>(
                         OPERATOR_MEMORY_LIMIT_BEFORE_SPILL,
                         "Experimental: Operator memory limit before spill",
@@ -270,15 +283,19 @@ public final class SystemSessionProperties
                         featuresConfig.isLegacyOrderBy(),
                         false),
                 booleanSessionProperty(
-                        REORDER_WINDOWS,
-                        "Allow reordering window functions in query",
-                        featuresConfig.isReorderWindows(),
-                        false),
-                booleanSessionProperty(
                         ITERATIVE_OPTIMIZER,
                         "Experimental: enable iterative optimizer",
                         featuresConfig.isIterativeOptimizerEnabled(),
                         false),
+                new PropertyMetadata<>(
+                        ITERATIVE_OPTIMIZER_TIMEOUT,
+                        "Timeout for plan optimization in iterative optimizer",
+                        VARCHAR,
+                        Duration.class,
+                        featuresConfig.getIterativeOptimizerTimeout(),
+                        false,
+                        value -> Duration.valueOf((String) value),
+                        Duration::toString),
                 booleanSessionProperty(
                         EXCHANGE_COMPRESSION,
                         "Enable compression in exchanges",
@@ -403,11 +420,6 @@ public final class SystemSessionProperties
         return priority;
     }
 
-    public static boolean isReorderWindowsEnabled(Session session)
-    {
-        return session.getSystemProperty(REORDER_WINDOWS, Boolean.class);
-    }
-
     public static Duration getSplitConcurrencyAdjustmentInterval(Session session)
     {
         return session.getSystemProperty(SPLIT_CONCURRENCY_ADJUSTMENT_INTERVAL, Duration.class);
@@ -443,6 +455,11 @@ public final class SystemSessionProperties
     public static boolean isNewOptimizerEnabled(Session session)
     {
         return session.getSystemProperty(ITERATIVE_OPTIMIZER, Boolean.class);
+    }
+
+    public static Duration getOptimizerTimeout(Session session)
+    {
+        return session.getSystemProperty(ITERATIVE_OPTIMIZER_TIMEOUT, Duration.class);
     }
 
     public static boolean isExchangeCompressionEnabled(Session session)

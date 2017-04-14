@@ -25,6 +25,7 @@ import com.facebook.presto.sql.gen.JoinCompiler;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import org.openjdk.jol.info.ClassLayout;
 
 import java.util.Arrays;
 import java.util.List;
@@ -48,8 +49,7 @@ import static java.util.Objects.requireNonNull;
 public class MultiChannelGroupByHash
         implements GroupByHash
 {
-    private static final JoinCompiler JOIN_COMPILER = new JoinCompiler();
-
+    private static final int INSTANCE_SIZE = ClassLayout.parseClass(MultiChannelGroupByHash.class).instanceSize();
     private static final float FILL_RATIO = 0.75f;
     private final List<Type> types;
     private final List<Type> hashTypes;
@@ -84,16 +84,19 @@ public class MultiChannelGroupByHash
             int[] hashChannels,
             Optional<Integer> inputHashChannel,
             int expectedSize,
-            boolean processDictionary)
+            boolean processDictionary,
+            JoinCompiler joinCompiler)
     {
         this.hashTypes = ImmutableList.copyOf(requireNonNull(hashTypes, "hashTypes is null"));
 
+        requireNonNull(joinCompiler, "joinCompiler is null");
+        requireNonNull(hashChannels, "hashChannels is null");
         checkArgument(hashTypes.size() == hashChannels.length, "hashTypes and hashChannels have different sizes");
         checkArgument(expectedSize > 0, "expectedSize must be greater than zero");
 
         this.inputHashChannel = requireNonNull(inputHashChannel, "inputHashChannel is null");
         this.types = inputHashChannel.isPresent() ? ImmutableList.copyOf(Iterables.concat(hashTypes, ImmutableList.of(BIGINT))) : this.hashTypes;
-        this.channels = requireNonNull(hashChannels, "hashChannels is null").clone();
+        this.channels = hashChannels.clone();
 
         this.hashGenerator = inputHashChannel.isPresent() ? new PrecomputedHashGenerator(inputHashChannel.get()) : new InterpretedHashGenerator(this.hashTypes, hashChannels);
         this.processDictionary = processDictionary;
@@ -115,7 +118,7 @@ public class MultiChannelGroupByHash
             this.precomputedHashChannel = Optional.empty();
         }
         this.channelBuilders = channelBuilders.build();
-        PagesHashStrategyFactory pagesHashStrategyFactory = JOIN_COMPILER.compilePagesHashStrategyFactory(this.types, outputChannels.build());
+        PagesHashStrategyFactory pagesHashStrategyFactory = joinCompiler.compilePagesHashStrategyFactory(this.types, outputChannels.build());
         hashStrategy = pagesHashStrategyFactory.createPagesHashStrategy(this.channelBuilders, this.precomputedHashChannel);
 
         startNewPage();
@@ -148,7 +151,8 @@ public class MultiChannelGroupByHash
     @Override
     public long getEstimatedSize()
     {
-        return (sizeOf(channelBuilders.get(0).elements()) * channelBuilders.size()) +
+        return INSTANCE_SIZE +
+                (sizeOf(channelBuilders.get(0).elements()) * channelBuilders.size()) +
                 completedPagesMemorySize +
                 currentPageBuilder.getRetainedSizeInBytes() +
                 sizeOf(groupAddressByHash) +
@@ -321,9 +325,12 @@ public class MultiChannelGroupByHash
     {
         if (currentPageBuilder != null) {
             completedPagesMemorySize += currentPageBuilder.getRetainedSizeInBytes();
+            currentPageBuilder = currentPageBuilder.newPageBuilderLike();
+        }
+        else {
+            currentPageBuilder = new PageBuilder(types);
         }
 
-        currentPageBuilder = new PageBuilder(types);
         for (int i = 0; i < types.size(); i++) {
             channelBuilders.get(i).add(currentPageBuilder.getBlockBuilder(i));
         }
@@ -409,7 +416,7 @@ public class MultiChannelGroupByHash
 
     private static int calculateMaxFill(int hashSize)
     {
-        checkArgument(hashSize > 0, "hashSize must greater than 0");
+        checkArgument(hashSize > 0, "hashSize must be greater than 0");
         int maxFill = (int) Math.ceil(hashSize * FILL_RATIO);
         if (maxFill == hashSize) {
             maxFill--;

@@ -42,6 +42,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.primitives.Ints;
+import com.google.common.util.concurrent.ListenableFuture;
 import io.airlift.concurrent.SetThreadName;
 import io.airlift.stats.TimeStat;
 import io.airlift.units.Duration;
@@ -55,7 +56,6 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -73,16 +73,17 @@ import static com.facebook.presto.spi.StandardErrorCode.NO_NODES_AVAILABLE;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.FIXED_BROADCAST_DISTRIBUTION;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.SOURCE_DISTRIBUTION;
 import static com.facebook.presto.util.Failures.checkCondition;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableMap;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableSet;
 import static com.google.common.base.Preconditions.checkArgument;
-import static io.airlift.concurrent.MoreFutures.firstCompletedFuture;
+import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.common.collect.ImmutableMap.toImmutableMap;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.airlift.concurrent.MoreFutures.tryGetFutureValue;
+import static io.airlift.concurrent.MoreFutures.whenAnyComplete;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static java.util.function.Function.identity;
 
 public class SqlQueryScheduler
 {
@@ -144,7 +145,7 @@ public class SqlQueryScheduler
         this.rootStageId = rootStage.getStageId();
 
         this.stages = stages.stream()
-                .collect(toImmutableMap(SqlStageExecution::getStageId));
+                .collect(toImmutableMap(SqlStageExecution::getStageId, identity()));
 
         this.stageSchedulers = stageSchedulers.build();
         this.stageLinkages = stageLinkages.build();
@@ -289,7 +290,7 @@ public class SqlQueryScheduler
     {
         Map<StageId, StageInfo> stageInfos = stages.values().stream()
                 .map(SqlStageExecution::getStageInfo)
-                .collect(toImmutableMap(StageInfo::getStageId));
+                .collect(toImmutableMap(StageInfo::getStageId, identity()));
 
         return buildStageInfo(rootStageId, stageInfos);
     }
@@ -344,7 +345,7 @@ public class SqlQueryScheduler
             Set<StageId> completedStages = new HashSet<>();
             ExecutionSchedule executionSchedule = executionPolicy.createExecutionSchedule(stages.values());
             while (!executionSchedule.isFinished()) {
-                List<CompletableFuture<?>> blockedStages = new ArrayList<>();
+                List<ListenableFuture<?>> blockedStages = new ArrayList<>();
                 for (SqlStageExecution stage : executionSchedule.getStagesToSchedule()) {
                     stage.beginScheduling();
 
@@ -388,9 +389,9 @@ public class SqlQueryScheduler
                 // wait for a state change and then schedule again
                 if (!blockedStages.isEmpty()) {
                     try (TimeStat.BlockTimer timer = schedulerStats.getSleepTime().time()) {
-                        tryGetFutureValue(firstCompletedFuture(blockedStages), 1, SECONDS);
+                        tryGetFutureValue(whenAnyComplete(blockedStages), 1, SECONDS);
                     }
-                    for (CompletableFuture<?> blockedStage : blockedStages) {
+                    for (ListenableFuture<?> blockedStage : blockedStages) {
                         blockedStage.cancel(true);
                     }
                 }
@@ -457,12 +458,13 @@ public class SqlQueryScheduler
             this.parent = parent;
             this.childOutputBufferManagers = children.stream()
                     .map(childStage -> {
-                        if (childStage.getFragment().getPartitioningScheme().getPartitioning().getHandle().equals(FIXED_BROADCAST_DISTRIBUTION)) {
+                        PartitioningHandle partitioningHandle = childStage.getFragment().getPartitioningScheme().getPartitioning().getHandle();
+                        if (partitioningHandle.equals(FIXED_BROADCAST_DISTRIBUTION)) {
                             return new BroadcastOutputBufferManager(childStage::setOutputBuffers);
                         }
                         else {
                             int partitionCount = Ints.max(childStage.getFragment().getPartitioningScheme().getBucketToPartition().get()) + 1;
-                            return new PartitionedOutputBufferManager(partitionCount, childStage::setOutputBuffers);
+                            return new PartitionedOutputBufferManager(partitioningHandle, partitionCount, childStage::setOutputBuffers);
                         }
                     })
                     .collect(toImmutableSet());

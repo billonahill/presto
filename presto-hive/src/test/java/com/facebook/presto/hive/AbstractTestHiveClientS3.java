@@ -43,10 +43,10 @@ import com.facebook.presto.spi.connector.ConnectorPageSinkProvider;
 import com.facebook.presto.spi.connector.ConnectorPageSourceProvider;
 import com.facebook.presto.spi.connector.ConnectorSplitManager;
 import com.facebook.presto.spi.predicate.TupleDomain;
+import com.facebook.presto.sql.gen.JoinCompiler;
 import com.facebook.presto.testing.MaterializedResult;
 import com.facebook.presto.testing.MaterializedRow;
 import com.facebook.presto.testing.TestingConnectorSession;
-import com.facebook.presto.type.TypeRegistry;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -75,6 +75,7 @@ import static com.facebook.presto.hive.AbstractTestHiveClient.filterNonHiddenCol
 import static com.facebook.presto.hive.AbstractTestHiveClient.getAllSplits;
 import static com.facebook.presto.hive.HiveTestUtils.TYPE_MANAGER;
 import static com.facebook.presto.hive.HiveTestUtils.getDefaultHiveDataStreamFactories;
+import static com.facebook.presto.hive.HiveTestUtils.getDefaultHiveFileWriterFactories;
 import static com.facebook.presto.hive.HiveTestUtils.getDefaultHiveRecordCursorProvider;
 import static com.facebook.presto.hive.HiveTestUtils.getTypes;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
@@ -168,7 +169,6 @@ public abstract class AbstractTestHiveClientS3
                 writableBucket,
                 hdfsEnvironment);
         locationService = new HiveLocationService(hdfsEnvironment);
-        TypeRegistry typeManager = new TypeRegistry();
         JsonCodec<PartitionUpdate> partitionUpdateCodec = JsonCodec.jsonCodec(PartitionUpdate.class);
         metadataFactory = new HiveMetadataFactory(
                 connectorId,
@@ -177,7 +177,7 @@ public abstract class AbstractTestHiveClientS3
                 hdfsEnvironment,
                 hivePartitionManager,
                 newDirectExecutorService(),
-                typeManager,
+                TYPE_MANAGER,
                 locationService,
                 new TableParameterCodec(),
                 partitionUpdateCodec,
@@ -191,13 +191,21 @@ public abstract class AbstractTestHiveClientS3
                 hdfsEnvironment,
                 new HadoopDirectoryLister(),
                 new BoundedExecutor(executor, hiveClientConfig.getMaxSplitIteratorThreads()),
-                new HiveCoercionPolicy(typeManager),
+                new HiveCoercionPolicy(TYPE_MANAGER),
                 hiveClientConfig.getMaxOutstandingSplits(),
                 hiveClientConfig.getMinPartitionBatchSize(),
                 hiveClientConfig.getMaxPartitionBatchSize(),
                 hiveClientConfig.getMaxInitialSplits(),
                 hiveClientConfig.getRecursiveDirWalkerEnabled());
-        pageSinkProvider = new HivePageSinkProvider(hdfsEnvironment, metastoreClient, new GroupByHashPageIndexerFactory(), typeManager, new HiveClientConfig(), locationService, partitionUpdateCodec);
+        pageSinkProvider = new HivePageSinkProvider(
+                getDefaultHiveFileWriterFactories(hiveClientConfig),
+                hdfsEnvironment,
+                metastoreClient,
+                new GroupByHashPageIndexerFactory(new JoinCompiler()),
+                TYPE_MANAGER,
+                new HiveClientConfig(),
+                locationService,
+                partitionUpdateCodec);
         pageSourceProvider = new HivePageSourceProvider(hiveClientConfig, hdfsEnvironment, getDefaultHiveRecordCursorProvider(hiveClientConfig), getDefaultHiveDataStreamFactories(hiveClientConfig), TYPE_MANAGER);
     }
 

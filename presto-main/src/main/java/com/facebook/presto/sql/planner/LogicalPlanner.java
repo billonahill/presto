@@ -48,6 +48,7 @@ import com.facebook.presto.sql.tree.Explain;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.Insert;
 import com.facebook.presto.sql.tree.LambdaArgumentDeclaration;
+import com.facebook.presto.sql.tree.LongLiteral;
 import com.facebook.presto.sql.tree.NullLiteral;
 import com.facebook.presto.sql.tree.Query;
 import com.facebook.presto.sql.tree.Statement;
@@ -67,8 +68,8 @@ import static com.facebook.presto.spi.type.VarbinaryType.VARBINARY;
 import static com.facebook.presto.sql.planner.plan.TableWriterNode.CreateName;
 import static com.facebook.presto.sql.planner.plan.TableWriterNode.InsertReference;
 import static com.facebook.presto.sql.planner.plan.TableWriterNode.WriterTarget;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 
@@ -127,16 +128,16 @@ public class LogicalPlanner
             PlanSanityChecker.validate(root, session, metadata, sqlParser, symbolAllocator.getTypes());
         }
 
-        return new Plan(root, symbolAllocator);
+        return new Plan(root, symbolAllocator.getTypes());
     }
 
     public PlanNode planStatement(Analysis analysis, Statement statement)
     {
         if (statement instanceof CreateTableAsSelect && analysis.isCreateTableAsSelectNoOp()) {
             checkState(analysis.getCreateTableDestination().isPresent(), "Table destination is missing");
-            List<Expression> emptyRow = ImmutableList.of();
-            PlanNode source = new ValuesNode(idAllocator.getNextId(), ImmutableList.of(), ImmutableList.of(emptyRow));
-            return new OutputNode(idAllocator.getNextId(), source, ImmutableList.of(), ImmutableList.of());
+            Symbol symbol = symbolAllocator.newSymbol("rows", BIGINT);
+            PlanNode source = new ValuesNode(idAllocator.getNextId(), ImmutableList.of(symbol), ImmutableList.of(ImmutableList.of(new LongLiteral("0"))));
+            return new OutputNode(idAllocator.getNextId(), source, ImmutableList.of("rows"), ImmutableList.of(symbol));
         }
         return createOutputPlan(planStatementWithoutOutput(analysis, statement), analysis);
     }
@@ -183,7 +184,7 @@ public class LogicalPlanner
 
         RelationPlan plan = createRelationPlan(analysis, query);
 
-        ConnectorTableMetadata tableMetadata = createTableMetadata(destination, getOutputTableColumns(plan), analysis.getCreateTableProperties(), analysis.getParameters());
+        ConnectorTableMetadata tableMetadata = createTableMetadata(destination, getOutputTableColumns(plan), analysis.getCreateTableProperties(), analysis.getParameters(), analysis.getCreateTableComment());
         Optional<NewTableLayout> newTableLayout = metadata.getNewTableLayout(session, destination.getCatalogName(), tableMetadata);
 
         List<String> columnNames = tableMetadata.getColumns().stream()
@@ -356,7 +357,7 @@ public class LogicalPlanner
                 .process(query, null);
     }
 
-    private ConnectorTableMetadata createTableMetadata(QualifiedObjectName table, List<ColumnMetadata> columns, Map<String, Expression> propertyExpressions, List<Expression> parameters)
+    private ConnectorTableMetadata createTableMetadata(QualifiedObjectName table, List<ColumnMetadata> columns, Map<String, Expression> propertyExpressions, List<Expression> parameters, Optional<String> comment)
     {
         ConnectorId connectorId = metadata.getCatalogHandle(session, table.getCatalogName())
                 .orElseThrow(() -> new PrestoException(NOT_FOUND, "Catalog does not exist: " + table.getCatalogName()));
@@ -369,7 +370,7 @@ public class LogicalPlanner
                 metadata,
                 parameters);
 
-        return new ConnectorTableMetadata(table.asSchemaTableName(), columns, properties);
+        return new ConnectorTableMetadata(table.asSchemaTableName(), columns, properties, comment);
     }
 
     private static List<ColumnMetadata> getOutputTableColumns(RelationPlan plan)

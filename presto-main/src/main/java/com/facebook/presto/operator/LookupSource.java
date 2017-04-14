@@ -24,8 +24,6 @@ import java.io.Closeable;
 public interface LookupSource
         extends Closeable
 {
-    boolean isEmpty();
-
     int getChannelCount();
 
     long getInMemorySizeInBytes();
@@ -44,6 +42,8 @@ public interface LookupSource
     {
         return (pageBuilder, outputChannelOffset) -> false;
     }
+
+    boolean isJoinPositionEligible(long currentJoinPosition, int probePosition, Page allProbeChannelsPage);
 
     @Override
     void close();

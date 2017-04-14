@@ -18,13 +18,11 @@ import com.facebook.presto.OutputBuffers.OutputBufferId;
 import com.facebook.presto.execution.StateMachine;
 import com.facebook.presto.execution.StateMachine.StateChangeListener;
 import com.facebook.presto.execution.SystemMemoryUsageListener;
-import com.facebook.presto.execution.buffer.ClientBuffer.SerializedPageReference;
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.ListenableFuture;
 import io.airlift.units.DataSize;
 
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -35,9 +33,9 @@ import static com.facebook.presto.execution.buffer.BufferState.FLUSHING;
 import static com.facebook.presto.execution.buffer.BufferState.NO_MORE_BUFFERS;
 import static com.facebook.presto.execution.buffer.BufferState.NO_MORE_PAGES;
 import static com.facebook.presto.execution.buffer.BufferState.OPEN;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.util.concurrent.Futures.immediateFuture;
 import static java.util.Objects.requireNonNull;
 
@@ -113,7 +111,6 @@ public class PartitionedOutputBuffer
         // always get the state first before any other stats
         BufferState state = this.state.get();
 
-        int totalBufferedBytes = 0;
         int totalBufferedPages = 0;
         ImmutableList.Builder<BufferInfo> infos = ImmutableList.builder();
         for (ClientBuffer partition : partitions) {
@@ -122,7 +119,6 @@ public class PartitionedOutputBuffer
 
             PageBufferInfo pageBufferInfo = bufferInfo.getPageBufferInfo();
             totalBufferedPages += pageBufferInfo.getBufferedPages();
-            totalBufferedBytes += pageBufferInfo.getBufferedBytes();
         }
 
         return new OutputBufferInfo(
@@ -130,7 +126,7 @@ public class PartitionedOutputBuffer
                 state,
                 state.canAddBuffers(),
                 state.canAddPages(),
-                totalBufferedBytes,
+                memoryManager.getBufferedBytes(),
                 totalBufferedPages,
                 totalRowsAdded.get(),
                 totalPagesAdded.get(),
@@ -194,7 +190,7 @@ public class PartitionedOutputBuffer
     }
 
     @Override
-    public CompletableFuture<BufferResult> get(OutputBufferId outputBufferId, long startingSequenceId, DataSize maxSize)
+    public ListenableFuture<BufferResult> get(OutputBufferId outputBufferId, long startingSequenceId, DataSize maxSize)
     {
         requireNonNull(outputBufferId, "outputBufferId is null");
         checkArgument(maxSize.toBytes() > 0, "maxSize must be at least 1 byte");
@@ -250,11 +246,8 @@ public class PartitionedOutputBuffer
             return;
         }
 
-        for (ClientBuffer partition : partitions) {
-            if (!partition.isDestroyed()) {
-                return;
-            }
+        if (partitions.stream().allMatch(ClientBuffer::isDestroyed)) {
+            destroy();
         }
-        destroy();
     }
 }
