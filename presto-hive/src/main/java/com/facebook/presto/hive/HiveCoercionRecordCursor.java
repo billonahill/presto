@@ -295,6 +295,7 @@ public class HiveCoercionRecordCursor
         else if (fromHiveType.equals(HIVE_FLOAT) && toHiveType.equals(HIVE_DOUBLE)) {
             return new FloatToDoubleCoercer();
         }
+        // TODO: StructCoercer needed
         throw new PrestoException(NOT_SUPPORTED, format("Unsupported coercion from %s to %s", fromHiveType, toHiveType));
     }
 
